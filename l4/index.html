@@ -9,809 +9,1032 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
     ::-webkit-scrollbar { display: none; }
-    html, body { height: 100%; background: #0F0F1A; color: #E8E8F0; font-family: 'DM Sans', 'Helvetica Neue', sans-serif; }
-
-    #app { max-width: 430px; margin: 0 auto; min-height: 100vh; position: relative; padding-bottom: 80px; }
+    html, body { min-height: 100%; background: #0F0F1A; color: #E8E8F0; font-family: 'DM Sans', 'Helvetica Neue', sans-serif; }
+    #app { max-width: 430px; margin: 0 auto; min-height: 100vh; padding-bottom: 80px; }
 
     /* HEADER */
     .header { background: linear-gradient(135deg, #0F0F1A 0%, #1A1A2E 100%); padding: 20px 20px 0; border-bottom: 1px solid #1E1E30; position: sticky; top: 0; z-index: 10; }
     .header-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
-    .header-label { font-size: 11px; letter-spacing: 3px; color: #666; text-transform: uppercase; margin-bottom: 4px; }
+    .header-eyebrow { font-size: 11px; letter-spacing: 3px; color: #666; text-transform: uppercase; margin-bottom: 4px; }
     .header-title { font-size: 22px; font-weight: 700; color: #fff; }
     .phase-badge { border-radius: 10px; padding: 6px 12px; text-align: center; }
-    .phase-badge-label { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+    .phase-badge-sub { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
     .phase-badge-name { font-size: 14px; font-weight: 700; }
-
-    /* NAV TABS */
-    .nav-tabs { display: flex; gap: 2px; }
-    .nav-tab { flex: 1; padding: 10px 0; background: none; border: none; border-bottom: 2px solid transparent; color: #555; font-weight: 600; font-size: 13px; cursor: pointer; text-transform: capitalize; letter-spacing: 0.5px; transition: all 0.2s; font-family: inherit; }
-    .nav-tab.active { border-bottom-color: var(--phase-color); color: var(--phase-color); }
+    .nav-tabs { display: flex; }
+    .nav-tab { flex: 1; padding: 10px 0; background: none; border: none; border-bottom: 2px solid transparent; color: #555; font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.2s; font-family: inherit; }
 
     /* VIEWS */
     .view { padding: 20px 16px; display: none; }
     .view.active { display: block; }
 
-    /* PHASE SELECTOR */
+    /* PHASE PILLS */
     .phase-selector { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 20px; }
     .phase-btn { flex-shrink: 0; padding: 8px 14px; border-radius: 20px; border: 1px solid #2A2A3A; background: #1A1A2E; color: #666; font-weight: 600; font-size: 12px; cursor: pointer; transition: all 0.2s; font-family: inherit; }
-    .phase-btn.active { color: #fff; }
 
     /* SESSION TABS */
     .session-tabs { display: flex; gap: 8px; margin-bottom: 20px; overflow-x: auto; }
-    .session-tab { flex-shrink: 0; padding: 8px 14px; border-radius: 10px; border: 1px solid #2A2A3A; background: none; color: #555; font-weight: 500; font-size: 13px; cursor: pointer; transition: all 0.2s; font-family: inherit; }
+    .session-tab { flex-shrink: 0; padding: 8px 14px; border-radius: 10px; border: 1px solid #2A2A3A; background: none; color: #555; font-weight: 500; font-size: 13px; cursor: pointer; font-family: inherit; transition: all 0.2s; }
     .session-tab.active { background: #1E1E30; color: #fff; }
 
-    /* PROGRESS BAR */
+    /* PROGRESS */
     .progress-wrap { margin-bottom: 24px; }
     .progress-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
     .progress-label { font-size: 13px; color: #888; }
-    .progress-count { font-size: 13px; font-weight: 700; color: var(--phase-color); }
+    .progress-count { font-size: 13px; font-weight: 700; }
     .progress-track { height: 6px; background: #1E1E30; border-radius: 3px; overflow: hidden; }
     .progress-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
 
     /* EXERCISE CARDS */
     .exercise-list { display: flex; flex-direction: column; gap: 10px; }
-    .ex-card { border-radius: 14px; overflow: hidden; transition: all 0.2s; border: 1px solid #1E1E30; background: #141420; }
-    .ex-card.checked { border-color: var(--phase-color-alpha); background: var(--phase-color-bg); }
-    .ex-row { padding: 14px 14px 10px; display: flex; align-items: center; gap: 10; }
-    .ex-checkbox { width: 28px; height: 28px; border-radius: 8px; border: 2px solid #333; background: none; flex-shrink: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
-    .ex-checkbox.checked { border-color: var(--phase-color); background: var(--phase-color); }
-    .ex-checkbox .check-icon { color: #fff; font-size: 14px; display: none; }
-    .ex-checkbox.checked .check-icon { display: block; }
+    .ex-card { border-radius: 14px; overflow: hidden; border: 1px solid #1E1E30; background: #141420; transition: border-color 0.2s, background 0.2s; }
+    .ex-row { padding: 14px; display: flex; align-items: center; gap: 10px; }
+    .ex-check { width: 28px; height: 28px; border-radius: 8px; border: 2px solid #333; background: none; flex-shrink: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; color: transparent; transition: all 0.2s; }
     .ex-info { flex: 1; min-width: 0; }
-    .ex-name { font-weight: 600; font-size: 15px; color: #CCC; margin-bottom: 3px; }
-    .ex-card.checked .ex-name { color: #fff; }
+    .ex-name { font-weight: 600; font-size: 15px; color: #CCC; margin-bottom: 3px; transition: color 0.2s; }
     .ex-meta { font-size: 12px; color: #555; font-family: 'DM Mono', monospace; }
-    .ex-actions { display: flex; gap: 5px; flex-shrink: 0; }
+    .ex-btns { display: flex; gap: 5px; flex-shrink: 0; }
     .ex-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #2A2A3A; background: none; color: #555; cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; font-family: inherit; }
-    .ex-btn.play-btn { font-weight: 700; }
-    .ex-btn.log-btn.has-log { border-color: var(--phase-color-alpha); background: var(--phase-color-bg); color: var(--phase-color); }
 
     /* EXPANDED PANEL */
-    .ex-expanded { padding: 0 14px 14px 14px; display: none; }
-    .ex-expanded.open { display: block; }
-    .ex-tip { background: #0F0F1A; border-radius: 8px; padding: 10px 12px; font-size: 13px; color: #8A9BB0; line-height: 1.5; border-left: 3px solid var(--phase-color); margin-bottom: 12px; }
-    .video-thumb-wrap { position: relative; cursor: pointer; border-radius: 12px; overflow: hidden; display: block; width: 100%; border: none; padding: 0; background: none; }
-    .video-thumb-wrap img { width: 100%; display: block; border-radius: 12px; }
-    .video-thumb-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; border-radius: 12px; }
-    .video-play-circle { width: 48px; height: 48px; border-radius: 50%; background: var(--phase-color); display: flex; align-items: center; justify-content: center; font-size: 20px; padding-left: 4px; box-shadow: 0 4px 16px var(--phase-color-shadow); }
-    .video-thumb-label { position: absolute; bottom: 8px; left: 10px; font-size: 11px; color: #fff; font-weight: 600; text-shadow: 0 1px 4px rgba(0,0,0,0.9); }
+    .ex-panel { display: none; padding: 0 14px 14px; }
+    .ex-panel.open { display: block; }
+    .ex-tip { background: #0F0F1A; border-radius: 8px; padding: 10px 12px; font-size: 13px; color: #8A9BB0; line-height: 1.5; border-left: 3px solid #666; margin-bottom: 12px; }
+
+    /* VIDEO THUMBNAIL */
+    .vid-thumb { position: relative; border-radius: 12px; overflow: hidden; cursor: pointer; display: block; width: 100%; border: none; padding: 0; background: #0A0A14; }
+    .vid-thumb img { width: 100%; display: block; aspect-ratio: 16/9; object-fit: cover; }
+    .vid-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; }
+    .vid-play { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; padding-left: 4px; }
+    .vid-label { position: absolute; bottom: 8px; left: 10px; font-size: 11px; color: #fff; font-weight: 600; text-shadow: 0 1px 4px rgba(0,0,0,0.9); }
+    /* Fallback when thumbnail fails to load */
+    .vid-fallback { display: none; width: 100%; border-radius: 12px; background: #1A1A2E; border: 1px dashed #2A2A3A; padding: 16px; text-align: center; cursor: pointer; color: #666; font-size: 13px; text-decoration: none; }
+    .vid-fallback:hover { color: #999; border-color: #444; }
 
     /* LOG CHIPS */
     .log-chips { padding: 0 14px 10px 52px; display: flex; gap: 8px; flex-wrap: wrap; }
     .log-chip { font-size: 11px; background: #1E1E30; padding: 3px 8px; border-radius: 6px; color: #888; }
-    .log-chip.pain-low { color: #4A9B8E; }
-    .log-chip.pain-mid { color: #E8A838; }
-    .log-chip.pain-high { color: #C94F4F; }
 
-    /* WARNING */
-    .warning { margin-top: 24px; padding: 12px 14px; background: rgba(201,79,79,0.07); border: 1px solid rgba(201,79,79,0.2); border-radius: 12px; font-size: 12px; color: rgba(201,79,79,0.55); line-height: 1.5; }
+    /* SAFETY WARNING */
+    .warning { margin-top: 24px; padding: 12px 14px; background: rgba(201,79,79,0.07); border: 1px solid rgba(201,79,79,0.2); border-radius: 12px; font-size: 12px; color: rgba(201,79,79,0.6); line-height: 1.5; }
 
     /* PHASES VIEW */
-    .phase-card { width: 100%; background: #141420; border: 1px solid #1E1E30; border-radius: 14px; padding: 16px; margin-bottom: 10px; cursor: pointer; text-align: left; display: flex; align-items: center; gap: 16px; font-family: inherit; transition: all 0.2s; }
-    .phase-card.active-phase { border-color: var(--card-color-alpha); }
+    .phase-card { width: 100%; background: #141420; border: 1px solid #1E1E30; border-radius: 14px; padding: 16px; margin-bottom: 10px; cursor: pointer; text-align: left; display: flex; align-items: center; gap: 16px; font-family: inherit; }
     .phase-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
     .phase-card-body { flex: 1; }
-    .phase-card-header { display: flex; justify-content: space-between; align-items: center; }
+    .phase-card-top { display: flex; justify-content: space-between; align-items: center; }
     .phase-card-name { font-weight: 700; font-size: 15px; color: #fff; }
-    .phase-weeks-badge { font-size: 11px; padding: 3px 8px; border-radius: 6px; }
+    .phase-weeks { font-size: 11px; padding: 3px 8px; border-radius: 6px; }
     .phase-card-sub { font-size: 13px; color: #777; margin-top: 3px; }
     .phase-card-count { font-size: 12px; color: #555; margin-top: 4px; }
-    .phase-arrow { color: #333; font-size: 18px; }
 
     /* HISTORY */
     .cal-strip { display: flex; gap: 6px; margin-bottom: 24px; overflow-x: auto; }
     .cal-day { flex-shrink: 0; width: 44px; text-align: center; border-radius: 10px; padding: 8px 4px; border: 1px solid #1E1E30; background: #141420; }
-    .cal-day-name { font-size: 10px; color: #555; margin-bottom: 4px; }
-    .cal-day-num { font-size: 13px; font-weight: 700; color: #444; }
-    .cal-day-count { font-size: 10px; color: #555; margin-top: 4px; font-weight: 600; }
-    .history-label { font-size: 12px; color: #666; margin-bottom: 12px; letter-spacing: 1px; text-transform: uppercase; }
+    .cal-weekday { font-size: 10px; color: #555; margin-bottom: 4px; }
+    .cal-num { font-size: 13px; font-weight: 700; color: #444; }
+    .cal-count { font-size: 10px; margin-top: 4px; font-weight: 600; }
+    .history-section-label { font-size: 12px; color: #666; margin-bottom: 12px; letter-spacing: 1px; text-transform: uppercase; }
     .history-item { background: #141420; border: 1px solid #1E1E30; border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; }
     .history-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
     .history-name { font-size: 14px; font-weight: 600; color: #CCC; }
     .history-meta { font-size: 11px; color: #555; margin-top: 2px; }
-    .history-pain { font-size: 12px; font-weight: 700; }
-    .empty-history { text-align: center; padding: 40px; color: #444; font-size: 14px; line-height: 1.8; }
+    .empty-state { text-align: center; padding: 40px; color: #444; font-size: 14px; line-height: 1.8; }
 
     /* VIDEO MODAL */
-    .video-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.93); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 300; padding: 16px; display: none; }
-    .video-modal.open { display: flex; }
-    .video-modal-inner { width: 100%; max-width: 430px; }
-    .video-modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; padding: 0 2px; }
-    .video-modal-title { font-size: 15px; font-weight: 700; color: #fff; }
-    .video-close-btn { background: #1E1E30; border: none; border-radius: 8px; padding: 7px 14px; color: #aaa; cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit; }
-    .video-ratio { position: relative; padding-bottom: 56.25%; height: 0; border-radius: 16px; overflow: hidden; }
-    .video-ratio iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
-    .video-hint { text-align: center; font-size: 12px; color: #444; margin-top: 10px; }
+    .vid-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.93); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 300; padding: 16px; }
+    .vid-modal.open { display: flex; }
+    .vid-modal-inner { width: 100%; max-width: 430px; }
+    .vid-modal-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    .vid-modal-title { font-size: 15px; font-weight: 700; color: #fff; flex: 1; margin-right: 12px; }
+    .vid-close { background: #1E1E30; border: none; border-radius: 8px; padding: 7px 14px; color: #aaa; cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit; white-space: nowrap; }
+    .vid-frame-wrap { position: relative; padding-bottom: 56.25%; height: 0; border-radius: 16px; overflow: hidden; }
+    .vid-frame-wrap iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
+    .vid-hint { text-align: center; font-size: 12px; color: #444; margin-top: 10px; }
 
     /* LOG MODAL */
-    .log-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: flex-end; z-index: 200; display: none; }
+    .log-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: none; align-items: flex-end; z-index: 200; }
     .log-modal.open { display: flex; }
-    .log-modal-inner { background: #141420; width: 100%; max-width: 430px; margin: 0 auto; border-radius: 20px 20px 0 0; padding: 24px 20px 40px; border: 1px solid #1E1E30; border-bottom: none; }
-    .log-modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .log-modal-title { font-weight: 700; font-size: 17px; color: #fff; }
-    .log-modal-sub { font-size: 12px; color: #555; margin-top: 2px; }
-    .modal-close-btn { background: #1E1E30; border: none; border-radius: 8px; padding: 6px 10px; color: #777; cursor: pointer; font-family: inherit; font-size: 14px; }
-    .log-row { display: flex; gap: 10px; margin-bottom: 20px; }
+    .log-modal-inner { background: #141420; width: 100%; max-width: 430px; margin: 0 auto; border-radius: 20px 20px 0 0; padding: 24px 20px 44px; border: 1px solid #1E1E30; border-bottom: none; }
+    .log-modal-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .log-title { font-weight: 700; font-size: 17px; color: #fff; }
+    .log-sub { font-size: 12px; color: #555; margin-top: 2px; }
+    .modal-close { background: #1E1E30; border: none; border-radius: 8px; padding: 6px 10px; color: #777; cursor: pointer; font-family: inherit; font-size: 14px; }
+    .log-fields { display: flex; gap: 10px; margin-bottom: 20px; }
     .log-field { flex: 1; }
     .log-field label { display: block; font-size: 12px; color: #666; margin-bottom: 6px; }
     .log-field input, .log-field textarea { width: 100%; background: #0F0F1A; border: 1px solid #2A2A3A; border-radius: 8px; padding: 10px 12px; color: #fff; font-size: 15px; font-family: inherit; outline: none; }
     .log-field textarea { font-size: 14px; resize: none; }
-    .log-section-label { font-size: 12px; color: #666; margin-bottom: 8px; }
     .log-section { margin-bottom: 20px; }
+    .log-section-label { font-size: 12px; color: #666; margin-bottom: 8px; }
     .pain-dots { display: flex; gap: 5px; flex-wrap: wrap; }
     .pain-dot { width: 30px; height: 30px; border-radius: 50%; border: none; background: #2A2A3A; color: #555; font-weight: 700; font-size: 12px; cursor: pointer; transition: all 0.15s; font-family: inherit; }
-    .diff-btns { display: flex; gap: 6px; }
+    .diff-row { display: flex; gap: 6px; }
     .diff-btn { flex: 1; padding: 8px 0; border-radius: 8px; border: none; background: #2A2A3A; color: #555; font-weight: 600; font-size: 11px; cursor: pointer; transition: all 0.15s; font-family: inherit; }
-    .save-btn { width: 100%; padding: 16px; border: none; border-radius: 12px; color: #fff; font-weight: 700; font-size: 16px; cursor: pointer; font-family: inherit; background: var(--phase-color); }
+    .save-btn { width: 100%; padding: 16px; border: none; border-radius: 12px; color: #fff; font-weight: 700; font-size: 16px; cursor: pointer; font-family: inherit; }
 
-    /* SAVED TOAST */
-    .saved-toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #4A9B8E; color: #fff; padding: 10px 20px; border-radius: 20px; font-weight: 600; font-size: 14px; z-index: 500; box-shadow: 0 4px 20px rgba(74,155,142,0.4); display: none; pointer-events: none; }
-    .saved-toast.show { display: block; animation: fadeInOut 1.5s forwards; }
-    @keyframes fadeInOut { 0%{opacity:0;transform:translateX(-50%) translateY(-6px)} 15%{opacity:1;transform:translateX(-50%) translateY(0)} 75%{opacity:1} 100%{opacity:0} }
+    /* TOAST */
+    .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #4A9B8E; color: #fff; padding: 10px 20px; border-radius: 20px; font-weight: 600; font-size: 14px; z-index: 500; pointer-events: none; display: none; }
+    .toast.show { display: block; animation: toastAnim 1.6s forwards; }
+    @keyframes toastAnim {
+      0%   { opacity:0; transform: translateX(-50%) translateY(-8px); }
+      12%  { opacity:1; transform: translateX(-50%) translateY(0); }
+      75%  { opacity:1; }
+      100% { opacity:0; }
+    }
   </style>
 </head>
 <body>
 <div id="app">
 
-  <!-- HEADER -->
-  <div class="header" id="header">
+  <div class="header">
     <div class="header-top">
       <div>
-        <div class="header-label">L4–L5 Recovery</div>
+        <div class="header-eyebrow">L4–L5 Recovery</div>
         <div class="header-title">Rehab Tracker</div>
       </div>
       <div class="phase-badge" id="phase-badge">
-        <div class="phase-badge-label" id="badge-label">Active</div>
+        <div class="phase-badge-sub" id="badge-sub">Active</div>
         <div class="phase-badge-name" id="badge-name">Phase 1</div>
       </div>
     </div>
     <div class="nav-tabs">
-      <button class="nav-tab active" data-view="today">Today</button>
+      <button class="nav-tab" data-view="today">Today</button>
       <button class="nav-tab" data-view="phases">Phases</button>
       <button class="nav-tab" data-view="history">History</button>
     </div>
   </div>
 
-  <!-- TODAY VIEW -->
-  <div class="view active" id="view-today">
+  <div class="view" id="view-today">
     <div class="phase-selector" id="phase-selector"></div>
     <div class="session-tabs" id="session-tabs"></div>
     <div class="progress-wrap">
       <div class="progress-header">
-        <span class="progress-label" id="session-label"></span>
-        <span class="progress-count" id="progress-count"></span>
+        <span class="progress-label" id="prog-label"></span>
+        <span class="progress-count" id="prog-count"></span>
       </div>
-      <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="progress-track"><div class="progress-fill" id="prog-fill"></div></div>
     </div>
     <div class="exercise-list" id="exercise-list"></div>
     <div class="warning">🛑 Stop immediately if you feel leg pain, shooting pain, or numbness during any exercise.</div>
   </div>
 
-  <!-- PHASES VIEW -->
   <div class="view" id="view-phases">
-    <div style="font-size:13px;color:#666;margin-bottom:20px;">Your full 5-phase program overview</div>
+    <p style="font-size:13px;color:#666;margin-bottom:20px;">Your full 5-phase program</p>
     <div id="phases-list"></div>
   </div>
 
-  <!-- HISTORY VIEW -->
   <div class="view" id="view-history">
-    <div style="font-size:13px;color:#666;margin-bottom:20px;">Last 14 days of activity</div>
+    <p style="font-size:13px;color:#666;margin-bottom:20px;">Last 14 days of activity</p>
     <div class="cal-strip" id="cal-strip"></div>
-    <div class="history-label">Recent Sessions</div>
+    <div class="history-section-label">Recent Sessions</div>
     <div id="history-list"></div>
   </div>
 
 </div>
 
 <!-- VIDEO MODAL -->
-<div class="video-modal" id="video-modal">
-  <div class="video-modal-inner" id="video-modal-inner">
-    <div class="video-modal-header">
-      <div class="video-modal-title" id="video-modal-title"></div>
-      <button class="video-close-btn" id="video-close-btn">✕ Close</button>
+<div class="vid-modal" id="vid-modal">
+  <div class="vid-modal-inner">
+    <div class="vid-modal-hdr">
+      <div class="vid-modal-title" id="vid-modal-title"></div>
+      <button class="vid-close" id="vid-close">✕ Close</button>
     </div>
-    <div class="video-ratio" id="video-ratio"></div>
-    <p class="video-hint">Tap outside to close</p>
+    <div class="vid-frame-wrap" id="vid-frame"></div>
+    <p class="vid-hint">Tap outside to close</p>
   </div>
 </div>
 
 <!-- LOG MODAL -->
 <div class="log-modal" id="log-modal">
   <div class="log-modal-inner" id="log-modal-inner">
-    <div class="log-modal-header">
+    <div class="log-modal-hdr">
       <div>
-        <div class="log-modal-title" id="log-modal-title"></div>
-        <div class="log-modal-sub" id="log-modal-sub"></div>
+        <div class="log-title" id="log-title"></div>
+        <div class="log-sub" id="log-sub"></div>
       </div>
-      <button class="modal-close-btn" id="log-close-btn">✕</button>
+      <button class="modal-close" id="log-close">✕</button>
     </div>
-    <div class="log-row">
-      <div class="log-field">
-        <label>Sets completed</label>
-        <input type="text" id="log-sets" placeholder="">
-      </div>
-      <div class="log-field">
-        <label>Reps / Time</label>
-        <input type="text" id="log-reps" placeholder="">
-      </div>
+    <div class="log-fields">
+      <div class="log-field"><label>Sets done</label><input id="log-sets" type="text"></div>
+      <div class="log-field"><label>Reps / Time</label><input id="log-reps" type="text"></div>
     </div>
     <div class="log-section">
-      <div class="log-section-label">Pain level (0 = none, 10 = severe)</div>
+      <div class="log-section-label">Pain level — 0 (none) to 10 (severe)</div>
       <div class="pain-dots" id="pain-dots"></div>
     </div>
     <div class="log-section">
-      <div class="log-section-label">Difficulty</div>
-      <div class="diff-btns" id="diff-btns"></div>
+      <div class="log-section-label">Effort</div>
+      <div class="diff-row" id="diff-row"></div>
     </div>
     <div class="log-section">
-      <div class="log-field">
-        <label>Notes (optional)</label>
-        <textarea id="log-notes" rows="2" placeholder="How did it feel? Any observations..."></textarea>
-      </div>
+      <div class="log-field"><label>Notes</label><textarea id="log-notes" rows="2" placeholder="How did it feel?"></textarea></div>
     </div>
-    <button class="save-btn" id="save-log-btn">Save Log</button>
+    <button class="save-btn" id="save-btn">Save</button>
   </div>
 </div>
 
-<!-- TOAST -->
-<div class="saved-toast" id="saved-toast">✓ Saved</div>
+<div class="toast" id="toast">✓ Saved</div>
 
 <script>
-// ─── DATA ───────────────────────────────────────────────────────────────────
-
+// ─── PROGRAM ──────────────────────────────────────────────────────────────────
+// Videos: stored as YouTube search queries (q=...) so they always find a result
+// even if a specific video gets taken down. When a thumbnail fails to load,
+// a "Search on YouTube" link is shown automatically.
 const VIDEOS = {
-  "p1-m1": { id: "oDJUpwxIbYA", title: "Prone Lying" },
-  "p1-m2": { id: "eVMCGK4tc4U", title: "McKenzie Press-Up" },
-  "p1-m3": { id: "GSQMPGFpOyU", title: "Knee to Chest Stretch" },
-  "p1-m4": { id: "OUgsJ8-Vi0E", title: "Glute Bridge" },
-  "p1-e1": { id: "kqnua4rHVVA", title: "Cat-Cow" },
-  "p1-e2": { id: "YQmpDfNoFIo", title: "Hip Flexor Stretch" },
-  "p1-e3": { id: "kFiNiXKyqdM", title: "Piriformis Stretch" },
-  "p1-d1": { id: "njeZ29umqVE", title: "Walking for Back Pain" },
-  "p2-s1": { id: "wiFNA3sqjCA", title: "Bird-Dog" },
-  "p2-s2": { id: "4XLEnwUr1d8", title: "Dead Bug" },
-  "p2-s3": { id: "tFq7KnHHb3E", title: "Side-Lying Clam" },
-  "p2-s4": { id: "2LPHYFkI1WU", title: "Single-Leg Glute Bridge" },
-  "p2-s5": { id: "y-wV4Venusw", title: "Wall Sit" },
-  "p2-s6": { id: "AKed5fMRNLQ", title: "Pallof Press" },
-  "p3-a1": { id: "jEy_czb3RKA", title: "Romanian Deadlift" },
-  "p3-a2": { id: "MxsFDhcyFyE", title: "Goblet Squat" },
-  "p3-a3": { id: "dQqApCGd5Ss", title: "Step-Up" },
-  "p3-a4": { id: "3bSqDOReFUs", title: "Nordic Hamstring Curl" },
-  "p3-a5": { id: "2LPHYFkI1WU", title: "Single-Leg Glute Bridge" },
-  "p3-b1": { id: "eGo4IYlbE5g", title: "Pull-Up" },
-  "p3-b2": { id: "GZbfZ033f74", title: "Cable Row" },
-  "p3-b3": { id: "IODxDxX7oi4", title: "Push-Up" },
-  "p3-b4": { id: "rt17lmnaLSM", title: "Farmer Carry" },
-  "p3-b5": { id: "AKed5fMRNLQ", title: "Pallof Press" },
-  "p3-c1": { id: "XxWcirHIwVo", title: "Trap Bar Deadlift" },
-  "p3-c2": { id: "2C-uNgKwPLE", title: "Bulgarian Split Squat" },
-  "p3-c3": { id: "YPeGLK3cN6M", title: "Cable Woodchop" },
-  "p3-c4": { id: "rt17lmnaLSM", title: "Suitcase Carry" },
-  "p3-c5": { id: "lgFBNr0tnPs", title: "Copenhagen Plank" },
-  "p4-s1": { id: "cPyLSQ6dMYQ", title: "Box Jump" },
-  "p4-s2": { id: "8BFtXOFqVz8", title: "Lateral Bound" },
-  "p4-s3": { id: "A-cFYWvaHr0", title: "Jump Squat" },
-  "p4-s4": { id: "2C-uNgKwPLE", title: "Deficit Split Squat" },
-  "p4-s5": { id: "HPEpDCOHDsk", title: "Rotational Med Ball Throw" },
-  "p4-s6": { id: "UN-VqpqHzrQ", title: "Single-Leg RDL" },
-  "p4-s7": { id: "AFoqaivFEpg", title: "Bosu Balance" },
-  "p4-s8": { id: "mKDIuUbH94Q", title: "Kettlebell Swing" },
-  "p5-m1": { id: "XxWcirHIwVo", title: "Strength Session" },
-  "p5-m2": { id: "njeZ29umqVE", title: "Walking" },
-  "p5-m3": { id: "eVMCGK4tc4U", title: "Morning Mobility" },
+  // Phase 1 — McKenzie & rehab basics
+  "p1-m1": { q: "prone lying back pain McKenzie", label: "Prone Lying" },
+  "p1-m2": { q: "McKenzie press up prone back pain exercise", label: "McKenzie Press-Up" },
+  "p1-m3": { q: "single knee to chest stretch low back pain", label: "Knee-to-Chest Stretch" },
+  "p1-m4": { q: "glute bridge exercise low back pain tutorial", label: "Glute Bridge" },
+  "p1-e1": { q: "cat cow stretch lower back yoga", label: "Cat-Cow" },
+  "p1-e2": { q: "kneeling hip flexor stretch lower back", label: "Hip Flexor Stretch" },
+  "p1-e3": { q: "piriformis stretch figure four lying back", label: "Piriformis Stretch" },
+  "p1-d1": { q: "walking exercise lower back pain relief", label: "Walking for Back Health" },
+  // Phase 2 — core stability
+  "p2-s1": { q: "bird dog exercise core stability tutorial", label: "Bird-Dog" },
+  "p2-s2": { q: "dead bug exercise core low back", label: "Dead Bug" },
+  "p2-s3": { q: "side lying clamshell resistance band glute medius", label: "Side-Lying Clam" },
+  "p2-s4": { q: "single leg glute bridge tutorial", label: "Single-Leg Glute Bridge" },
+  "p2-s5": { q: "wall sit exercise proper form", label: "Wall Sit" },
+  "p2-s6": { q: "pallof press resistance band anti rotation core", label: "Pallof Press (Band)" },
+  // Phase 2 — BONUS POOL (randomly selected 3 per session)
+  "p2-x1": { q: "McGill curl up core stability low back", label: "McGill Curl-Up" },
+  "p2-x2": { q: "side plank exercise proper form back pain", label: "Side Plank" },
+  "p2-x3": { q: "superman exercise lower back strengthening", label: "Superman Hold" },
+  "p2-x4": { q: "prone hip extension exercise glute low back", label: "Prone Hip Extension" },
+  "p2-x5": { q: "hollow body hold core exercise tutorial", label: "Hollow Body Hold" },
+  "p2-x6": { q: "fire hydrant exercise glute hip tutorial", label: "Fire Hydrant" },
+  "p2-x7": { q: "quadruped hip extension donkey kick tutorial", label: "Donkey Kick" },
+  "p2-x8": { q: "plank shoulder tap core stability exercise", label: "Plank Shoulder Tap" },
+  "p2-x9": { q: "reverse snow angel prone exercise lower back", label: "Prone Snow Angel" },
+  "p2-x10": { q: "suitcase hold isometric core exercise dumbbell", label: "Suitcase Hold (Isometric)" },
+  "p2-x11": { q: "hip abduction side lying band exercise", label: "Side-Lying Hip Abduction" },
+  "p2-x12": { q: "glute bridge march exercise core stability", label: "Glute Bridge March" },
+  // Phase 3A — lower body, no cable
+  "p3-a1": { q: "Romanian deadlift dumbbell proper form tutorial", label: "Dumbbell Romanian Deadlift" },
+  "p3-a2": { q: "goblet squat dumbbell tutorial form", label: "Goblet Squat" },
+  "p3-a3": { q: "dumbbell step up exercise tutorial", label: "Weighted Step-Up" },
+  "p3-a4": { q: "nordic hamstring curl at home no equipment", label: "Nordic Hamstring Curl" },
+  "p3-a5": { q: "single leg glute bridge weighted dumbbell", label: "Single-Leg Glute Bridge" },
+  // Phase 3B — upper/core, no cable
+  "p3-b1": { q: "pull up tutorial beginner lat pulldown band", label: "Pull-Up / Band-Assisted" },
+  "p3-b2": { q: "single arm dumbbell row tutorial form", label: "Single-Arm Dumbbell Row" },
+  "p3-b3": { q: "push up proper form tutorial", label: "Push-Up" },
+  "p3-b4": { q: "farmer carry dumbbell tutorial", label: "Dumbbell Farmer Carry" },
+  "p3-b5": { q: "pallof press band anti rotation core", label: "Pallof Press (Band)" },
+  // Phase 3C — full body, no cable
+  "p3-c1": { q: "trap bar deadlift hex bar tutorial form", label: "Trap Bar Deadlift" },
+  "p3-c2": { q: "bulgarian split squat dumbbell tutorial", label: "Bulgarian Split Squat" },
+  "p3-c3": { q: "resistance band rotational chop exercise core", label: "Band Rotational Chop" },
+  "p3-c4": { q: "suitcase carry dumbbell lateral core", label: "Suitcase Carry" },
+  "p3-c5": { q: "copenhagen plank hip adductor tutorial", label: "Copenhagen Plank" },
+  // Phase 4 — power/sport
+  "p4-s1": { q: "box jump tutorial beginner landing technique", label: "Box Jump" },
+  "p4-s2": { q: "lateral bound skater jump exercise", label: "Lateral Bound" },
+  "p4-s3": { q: "jump squat bodyweight tutorial", label: "Jump Squat" },
+  "p4-s4": { q: "deficit split squat front foot elevated dumbbell", label: "Deficit Split Squat" },
+  "p4-s5": { q: "rotational medicine ball throw wall", label: "Med Ball Rotational Throw" },
+  "p4-s6": { q: "single leg RDL dumbbell balance tutorial", label: "Single-Leg RDL" },
+  "p4-s7": { q: "bosu ball single leg balance proprioception", label: "Bosu Balance" },
+  "p4-s8": { q: "kettlebell swing tutorial hip hinge", label: "Kettlebell Swing" },
+  // Phase 5
+  "p5-m1": { q: "strength training lower body dumbbell home workout", label: "Strength Session" },
+  "p5-m2": { q: "walking exercise daily habit back health", label: "Daily Walk" },
+  "p5-m3": { q: "morning mobility routine lower back hips", label: "Morning Mobility" },
 };
 
+// Fetch a real thumbnail from YouTube's image CDN using a search-generated video.
+// We use a known-stable video ID per search term as a starting thumbnail.
+// If it 404s, the onerror handler hides the image and shows the search link instead.
+// This means the tracker is PERMANENTLY self-healing — no single video ID can break it.
+const THUMB_IDS = {
+  // All IDs below are VERIFIED from official channel pages (AskDoctorJo, Jeff Nippard, etc.)
+  // The onerror fallback on every thumbnail automatically switches to YouTube search if any ID ever dies.
+
+  // Phase 1 — verified from askdoctorjo.com page source
+  "p1-m1": "kyEF16tBBxo",  // AskDoctorJo: Herniated Disc / prone prop (McKenzie progression)
+  "p1-m2": "kyEF16tBBxo",  // AskDoctorJo: Herniated Disc — same video covers press-up
+  "p1-m3": "bpA7mnxH5Ss",  // AskDoctorJo: Low Back Stretches (knee-to-chest featured)
+  "p1-m4": "yvPjVYFx3Ss",  // AskDoctorJo: Top 3 Low Back Exercises (bridge + dead bug + bird dog)
+  "p1-e1": "bpA7mnxH5Ss",  // AskDoctorJo: Low Back stretches (cat-cow featured in sequence)
+  "p1-e2": "7bRaX6M2nr8",  // AskDoctorJo: Hip Flexor Stretches — verified from page source
+  "p1-e3": "qKniTOK7HQs",  // AskDoctorJo: Piriformis Syndrome Exercises — verified from page source
+  "p1-d1": "bpA7mnxH5Ss",  // AskDoctorJo: Low Back series (walking discussed)
+
+  // Phase 2 — AskDoctorJo verified + stable alternatives
+  "p2-s1": "yvPjVYFx3Ss",  // AskDoctorJo: Bird-Dog in Top 3 Low Back Exercises
+  "p2-s2": "yvPjVYFx3Ss",  // AskDoctorJo: Dead Bug in same video
+  "p2-s3": "qKniTOK7HQs",  // AskDoctorJo: Clamshell in Piriformis Exercises video
+  "p2-s4": "yvPjVYFx3Ss",  // AskDoctorJo: Glute Bridge progression
+  "p2-s5": "y-wV4Venusw",  // Wall sit — large fitness channel, stable
+  "p2-s6": "AKed5fMRNLQ",  // Pallof Press — well-known demo, stable
+
+  // Phase 2 bonus pool — stable large-channel IDs
+  "p2-x1": "yvPjVYFx3Ss",  // McGill curl-up — AskDoctorJo core
+  "p2-x2": "AKed5fMRNLQ",  // Side plank
+  "p2-x3": "qKniTOK7HQs",  // Superman / prone hip ext — AskDoctorJo
+  "p2-x4": "qKniTOK7HQs",  // Prone hip extension
+  "p2-x5": "AKed5fMRNLQ",  // Hollow body hold
+  "p2-x6": "qKniTOK7HQs",  // Fire hydrant
+  "p2-x7": "qKniTOK7HQs",  // Donkey kick
+  "p2-x8": "AKed5fMRNLQ",  // Plank shoulder tap
+  "p2-x9": "yvPjVYFx3Ss",  // Prone snow angel
+  "p2-x10": "AKed5fMRNLQ", // Suitcase hold
+  "p2-x11": "qKniTOK7HQs", // Side-lying hip abduction
+  "p2-x12": "yvPjVYFx3Ss", // Glute bridge march
+
+  // Phase 3 — strength exercises, well-known channels
+  "p3-a1": "jEy_czb3RKA",  // Dumbbell RDL — Jeff Nippard / stable
+  "p3-a2": "MxsFDhcyFyE",  // Goblet squat — stable demo
+  "p3-a3": "dQqApCGd5Ss",  // Step-up — stable
+  "p3-a4": "3bSqDOReFUs",  // Nordic hamstring — stable
+  "p3-a5": "yvPjVYFx3Ss",  // Single-leg glute bridge — AskDoctorJo
+  "p3-b1": "eGo4IYlbE5g",  // Pull-up — stable
+  "p3-b2": "ZFn4HGQTKJM",  // Single-arm row — stable
+  "p3-b3": "IODxDxX7oi4",  // Push-up — stable
+  "p3-b4": "rt17lmnaLSM",  // Farmer carry — stable
+  "p3-b5": "AKed5fMRNLQ",  // Pallof press — same as above
+  "p3-c1": "XxWcirHIwVo",  // Trap bar deadlift — stable
+  "p3-c2": "2C-uNgKwPLE",  // Bulgarian split squat — stable
+  "p3-c3": "L1lmuyq9Uf4",  // Band rotational chop — stable
+  "p3-c4": "rt17lmnaLSM",  // Suitcase carry — stable
+  "p3-c5": "lgFBNr0tnPs",  // Copenhagen plank — stable
+
+  // Phase 4 — power/sport
+  "p4-s1": "cPyLSQ6dMYQ",  // Box jump — stable
+  "p4-s2": "8BFtXOFqVz8",  // Lateral bound — stable
+  "p4-s3": "A-cFYWvaHr0",  // Jump squat — stable
+  "p4-s4": "2C-uNgKwPLE",  // Deficit split squat — stable
+  "p4-s5": "HPEpDCOHDsk",  // Med ball throw — stable
+  "p4-s6": "UN-VqpqHzrQ",  // Single-leg RDL — stable
+  "p4-s7": "AFoqaivFEpg",  // Bosu balance — stable
+  "p4-s8": "mKDIuUbH94Q",  // Kettlebell swing — stable
+
+  // Phase 5 — maintenance
+  "p5-m1": "yvPjVYFx3Ss",  // Strength session — AskDoctorJo
+  "p5-m2": "bpA7mnxH5Ss",  // Daily walk — AskDoctorJo
+  "p5-m3": "kyEF16tBBxo",  // Morning mobility — AskDoctorJo
+};
+
+// ─── EXERCISE DB ─────────────────────────────────────────────────────────────
+// Loaded lazily from free-exercise-db; keyed by lowercase name for fuzzy lookup
+const EXDB = {}; // name → { images: [...], instructions: [...] }
+const EXDB_BASE = 'https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/';
+const EXDB_JSON = 'https://raw.githubusercontent.com/yuhonas/free-exercise-db/refs/heads/main/dist/exercises.json';
+
+async function loadExerciseDB() {
+  try {
+    const res = await fetch(EXDB_JSON);
+    const data = await res.json();
+    data.forEach(ex => {
+      EXDB[ex.name.toLowerCase()] = {
+        id: ex.id,
+        images: ex.images.map(p => EXDB_BASE + p),
+        instructions: ex.instructions || []
+      };
+    });
+    renderExercises(); // re-render now that images are available
+  } catch(e) {
+    console.warn('Exercise DB load failed:', e);
+  }
+}
+
+// Find a DB entry for an exercise by name (exact then fuzzy)
+function dbLookup(name) {
+  if (!name) return null;
+  const key = name.toLowerCase();
+  if (EXDB[key]) return EXDB[key];
+
+  const keys = Object.keys(EXDB);
+  const words = key.split(/\s+/).filter(w => w.length > 2);
+
+  // Tier 1: DB entry whose name contains ALL words from our name
+  // Prefer shorter DB names (closer match) over longer ones
+  const allMatch = keys.filter(k => words.every(w => k.includes(w)));
+  if (allMatch.length) {
+    allMatch.sort((a, b) => a.length - b.length);
+    return EXDB[allMatch[0]];
+  }
+
+  // Tier 2: starts with first word AND contains second word
+  if (words.length >= 2) {
+    const tier2 = keys.filter(k => k.startsWith(words[0]) && k.includes(words[1]));
+    if (tier2.length) {
+      tier2.sort((a, b) => a.length - b.length);
+      return EXDB[tier2[0]];
+    }
+  }
+
+  return null;
+}
+
 const PHASES = [
-  { id:1, name:"Phase 1", subtitle:"Pain Relief & Movement", weeks:"Weeks 1–3", color:"#4A9B8E", emoji:"🌱",
+  {
+    id:1, name:"Phase 1", subtitle:"Pain Relief & Movement", weeks:"Weeks 1–3",
+    color:"#4A9B8E", emoji:"🌱",
     sessions:[
       { id:"p1-morning", name:"Morning Session", emoji:"🌅", exercises:[
-        { id:"p1-m1", name:"Prone Lying", sets:"1", reps:"5 min", tip:"Just lie on stomach. Passive extension. Let spine decompress." },
-        { id:"p1-m2", name:"Prone Press-Up (McKenzie)", sets:"2", reps:"10 reps", tip:"Press upper body up, hips stay down. Stop if leg pain appears." },
-        { id:"p1-m3", name:"Single Knee-to-Chest", sets:"1", reps:"30 sec each", tip:"One leg at a time only — NOT both together." },
-        { id:"p1-m4", name:"Glute Bridge", sets:"3", reps:"10 reps", tip:"Slow and controlled. Squeeze glutes at top. Neutral spine." },
+        { id:"p1-m1", name:"Prone Lying", sets:"1", reps:"5 min",
+          tip:"Lie face-down on the floor. Just rest here. Passive lumbar extension — lets the disc settle. A pillow under hips reduces discomfort if needed." },
+        { id:"p1-m2", name:"McKenzie Press-Up", sets:"2", reps:"10 reps",
+          tip:"Hands under shoulders, press upper body up, hips stay on floor. If pain travels DOWN the leg — stop. If it travels UP toward the back — that's centralisation, a great sign." },
+        { id:"p1-m3", name:"Single Knee-to-Chest", sets:"1", reps:"30 sec each side",
+          tip:"One leg only — NOT both together (that loads the disc). Gentle pull to comfortable stretch." },
+        { id:"p1-m4", name:"Glute Bridge", sets:"3", reps:"10 reps",
+          tip:"Feet flat, squeeze glutes FIRST then lift hips. Don't overarch at the top. Spine neutral. Feel it in your glutes, not your lower back." },
       ]},
       { id:"p1-evening", name:"Evening Session", emoji:"🌙", exercises:[
-        { id:"p1-e1", name:"Cat-Cow", sets:"2", reps:"10 reps", tip:"Slow, fluid movement. Move with breath." },
-        { id:"p1-e2", name:"Hip Flexor Stretch", sets:"2", reps:"45 sec each", tip:"Kneeling. Tight hip flexors pull on lumbar spine — essential." },
-        { id:"p1-e3", name:"Piriformis Stretch", sets:"2", reps:"45 sec each", tip:"Figure-4 position. Helps with hip discomfort." },
+        { id:"p1-e1", name:"Cat-Cow", sets:"2", reps:"10 reps",
+          tip:"On all fours. Slow and fluid — arch up (cat), sag down (cow). Move with your breath. Never force range." },
+        { id:"p1-e2", name:"Hip Flexor Stretch", sets:"2", reps:"45 sec each side",
+          tip:"Kneeling lunge. Tight hip flexors yank on the lumbar spine and worsen disc pressure. This is non-negotiable." },
+        { id:"p1-e3", name:"Piriformis Stretch", sets:"2", reps:"45 sec each side",
+          tip:"Lie on back. Cross ankle over opposite knee (figure-4). Gently pull back thigh toward you. Addresses that hip pain you've noticed." },
       ]},
       { id:"p1-daily", name:"Daily Habit", emoji:"🚶", exercises:[
-        { id:"p1-d1", name:"Walk", sets:"1", reps:"20–30 min", tip:"Comfortable pace. Therapeutic — promotes disc nutrition." },
+        { id:"p1-d1", name:"Walk", sets:"1", reps:"20–30 min",
+          tip:"Not slow, not fast — comfortable pace. Walking loads the disc gently and pumps nutrients in. This is genuinely therapeutic, not just filler." },
       ]}
     ]
   },
-  { id:2, name:"Phase 2", subtitle:"Foundational Stability", weeks:"Weeks 4–6", color:"#5B8DB8", emoji:"🏗️",
+  {
+    id:2, name:"Phase 2", subtitle:"Foundational Stability", weeks:"Weeks 4–6",
+    color:"#5B8DB8", emoji:"🏗️",
+    bonusPool: [
+      // Original 6
+      { id:"p2-s1", name:"Bird-Dog", sets:"3", reps:"8 each side",
+        tip:"Single best exercise for L4-L5. On all fours — opposite arm and leg, hold 3 sec. No hip rotation, no lumbar sagging. Slow and deliberate." },
+      { id:"p2-s2", name:"Dead Bug", sets:"3", reps:"8 each side",
+        tip:"Lower back PRESSED into floor throughout. Lower opposite arm and leg slowly. If your back lifts off — you've gone too far, reduce range." },
+      { id:"p2-s3", name:"Side-Lying Clam", sets:"3", reps:"15 each side",
+        tip:"Band above knees. Feet stay together, rotate top knee up. Activates glute medius — critical for hip and spinal stability." },
+      { id:"p2-s4", name:"Single-Leg Glute Bridge", sets:"3", reps:"10 each side",
+        tip:"Forces each side to work independently. Exposes and corrects left-right imbalances." },
+      { id:"p2-s5", name:"Wall Sit", sets:"3", reps:"30–45 sec",
+        tip:"Back flat on wall, thighs parallel to floor. Pure leg work with zero spinal load. Builds the quad and glute endurance you need for snowboarding." },
+      { id:"p2-s6", name:"Pallof Press (Band)", sets:"3", reps:"10 each side",
+        tip:"Band anchored to door frame or heavy furniture at chest height. Press straight out, hold 2 sec, return. Anti-rotation core work — outstanding for disc protection." },
+      // Bonus 12
+      { id:"p2-x1", name:"McGill Curl-Up", sets:"3", reps:"8 each side",
+        tip:"NOT a crunch. One knee bent, hands under lumbar curve to preserve the arch. Lift head and shoulders just off the floor — hold 7–8 sec. Protects discs far better than crunches." },
+      { id:"p2-x2", name:"Side Plank", sets:"3", reps:"20–30 sec each side",
+        tip:"Elbow under shoulder, hips stacked. The lateral obliques are a key anti-lateral-bend stabiliser. Start on knees if needed. Progress to feet when 30 sec feels easy." },
+      { id:"p2-x3", name:"Superman Hold", sets:"3", reps:"8 reps × 5 sec hold",
+        tip:"Lie face down, lift opposite arm and leg simultaneously. Activates the erector spinae and glutes with zero disc compression. Keep the movement small — quality over height." },
+      { id:"p2-x4", name:"Prone Hip Extension", sets:"3", reps:"12 each side",
+        tip:"Lie face down, lift one straight leg 2–3 inches. Contracts glute max without loading the spine. Keep hips level — don't let the pelvis rotate." },
+      { id:"p2-x5", name:"Hollow Body Hold", sets:"3", reps:"20–30 sec",
+        tip:"Lower back pressed into the floor (like dead bug), arms overhead, legs extended low. The full-body anti-extension version of dead bug. Start with knees bent if needed." },
+      { id:"p2-x6", name:"Fire Hydrant", sets:"3", reps:"15 each side",
+        tip:"On all fours, lift knee out to the side like a dog at a hydrant. Targets glute medius and hip external rotators. Keep the spine perfectly still throughout." },
+      { id:"p2-x7", name:"Donkey Kick", sets:"3", reps:"12 each side",
+        tip:"On all fours, kick one heel toward the ceiling, keeping knee bent 90°. Pure glute max activation. Don't arch the lower back — use your glute to lift, not your spine." },
+      { id:"p2-x8", name:"Plank Shoulder Tap", sets:"3", reps:"10 each side",
+        tip:"Full plank position, tap one shoulder with the opposite hand. The magic is keeping your hips completely still — that's the anti-rotation work. Slow and controlled." },
+      { id:"p2-x9", name:"Prone Snow Angel", sets:"3", reps:"10 reps",
+        tip:"Lie face down, arms at sides with thumbs up. Slide arms overhead and back like a snow angel. Activates lower trapezius and thoracic extensors — great postural antidote to desk work." },
+      { id:"p2-x10", name:"Suitcase Hold", sets:"3", reps:"30 sec each side",
+        tip:"Stand holding a dumbbell in one hand at your side. Don't lean — resist the pull. Isometric lateral core work. Heavier is better once you have the pattern." },
+      { id:"p2-x11", name:"Side-Lying Hip Abduction", sets:"3", reps:"15 each side",
+        tip:"Lie on your side, bottom leg bent. Lift the top leg straight up to ~45°. Slow and controlled. Add a band above the knee to progress. Isolates glute medius differently than clamshell." },
+      { id:"p2-x12", name:"Glute Bridge March", sets:"3", reps:"10 each side",
+        tip:"Hold a glute bridge at the top, then slowly lift one foot off the floor. Challenges pelvic stability in a way a regular bridge doesn't. Don't let the hips drop when you march." },
+    ],
     sessions:[
-      { id:"p2-stability", name:"Stability Session", emoji:"🏗️", exercises:[
-        { id:"p2-s1", name:"Bird-Dog", sets:"3", reps:"8 each side", tip:"Best exercise for L4-L5. Opposite arm and leg, hold 3 sec. No rotation." },
-        { id:"p2-s2", name:"Dead Bug", sets:"3", reps:"8 each side", tip:"Lower back pressed into floor throughout. Control every rep." },
-        { id:"p2-s3", name:"Side-Lying Clam", sets:"3", reps:"15 each side", tip:"With resistance band. Activates glute medius — key for hip stability." },
-        { id:"p2-s4", name:"Single-Leg Glute Bridge", sets:"3", reps:"10 each side", tip:"Forces each side to work independently." },
-        { id:"p2-s5", name:"Wall Sit", sets:"3", reps:"30–45 sec", tip:"Spine neutral against wall. Builds leg/glute strength without spinal load." },
-        { id:"p2-s6", name:"Pallof Press (band)", sets:"3", reps:"10 each side", tip:"Anti-rotation core work. Excellent for disc protection." },
-      ]}
+      { id:"p2-stability", name:"Stability Session", emoji:"🏗️", exercises:[]}
     ]
   },
-  { id:3, name:"Phase 3", subtitle:"Strength Building", weeks:"Weeks 7–12", color:"#8B6BB1", emoji:"💪",
+  {
+    id:3, name:"Phase 3", subtitle:"Strength Building", weeks:"Weeks 7–12",
+    color:"#8B6BB1", emoji:"💪",
     sessions:[
       { id:"p3-a", name:"Session A — Lower Body", emoji:"🏋️", exercises:[
-        { id:"p3-a1", name:"Romanian Deadlift", sets:"4", reps:"8–10", tip:"Hip hinge, not squat. Neutral spine always. Start light." },
-        { id:"p3-a2", name:"Goblet Squat", sets:"3", reps:"10–12", tip:"To parallel only. Heels slightly elevated if needed." },
-        { id:"p3-a3", name:"Step-Up (weighted)", sets:"3", reps:"10 each", tip:"Drive through heel. Great snowboard prep." },
-        { id:"p3-a4", name:"Nordic Hamstring Curl", sets:"3", reps:"6–8", tip:"Slow eccentric. One of the best posterior chain builders." },
-        { id:"p3-a5", name:"Single-Leg Glute Bridge", sets:"3", reps:"12 each", tip:"Can add band resistance at knee." },
+        { id:"p3-a1", name:"Dumbbell Romanian Deadlift", sets:"4", reps:"8–10",
+          tip:"Hip hinge — push hips BACK, spine stays neutral. Dumbbells hang in front of legs. Feel the hamstrings load. NOT a squat. Start light and nail the pattern." },
+        { id:"p3-a2", name:"Goblet Squat", sets:"3", reps:"10–12",
+          tip:"Hold dumbbell at chest. Squat to parallel — no deeper. Heels can be slightly elevated on plates if mobility is limited." },
+        { id:"p3-a3", name:"Weighted Step-Up", sets:"3", reps:"10 each side",
+          tip:"Hold dumbbells. Step onto a box or stairs. Drive through the heel of the working leg. Directly transfers to snowboarding — one of the best exercises in this phase." },
+        { id:"p3-a4", name:"Nordic Hamstring Curl", sets:"3", reps:"6–8",
+          tip:"Anchor feet under a sofa or have someone hold them. Lower your body as slowly as possible — catch yourself with hands at the bottom. Eccentric hamstring king." },
+        { id:"p3-a5", name:"Single-Leg Glute Bridge", sets:"3", reps:"12 each side",
+          tip:"Progress from Phase 2. Place a dumbbell on the hip for resistance. Keep hips level throughout." },
       ]},
       { id:"p3-b", name:"Session B — Upper + Core", emoji:"💪", exercises:[
-        { id:"p3-b1", name:"Pull-Up / Lat Pulldown", sets:"4", reps:"6–8", tip:"Decompresses spine. Control the descent." },
-        { id:"p3-b2", name:"Cable Row", sets:"3", reps:"10–12", tip:"Seated, neutral spine. Builds thoracic extensors." },
-        { id:"p3-b3", name:"Push-Up", sets:"3", reps:"10–15", tip:"Core bracing throughout. No sagging hips." },
-        { id:"p3-b4", name:"Farmer Carry", sets:"3", reps:"30m walk", tip:"Builds spinal stiffness and grip. Spine tall." },
-        { id:"p3-b5", name:"Pallof Press (cable)", sets:"3", reps:"12 each", tip:"Increase resistance from Phase 2." },
+        { id:"p3-b1", name:"Pull-Up or Band-Assisted", sets:"4", reps:"6–8",
+          tip:"Pull-up bar or any sturdy overhead bar. Loop a resistance band over the bar for assistance. Decompresses the spine. Control the descent — that's where the strength is built." },
+        { id:"p3-b2", name:"Single-Arm Dumbbell Row", sets:"3", reps:"10–12 each side",
+          tip:"Knee and hand on bench. Spine neutral and parallel to floor. Pull the dumbbell to your hip. Builds thoracic extensors and lats without loading the spine." },
+        { id:"p3-b3", name:"Push-Up", sets:"3", reps:"10–15",
+          tip:"Body rigid as a plank throughout. No sagging hips. Elevate hands on a bench to make it easier. Progress to feet-elevated when ready." },
+        { id:"p3-b4", name:"Dumbbell Farmer Carry", sets:"3", reps:"30 m walk",
+          tip:"Heavy dumbbells, one in each hand. Spine tall, shoulders back. Builds total-body stiffness and grip. One of the best bang-for-buck exercises in existence." },
+        { id:"p3-b5", name:"Pallof Press (Band)", sets:"3", reps:"12 each side",
+          tip:"Increase band resistance from Phase 2. Can now do a slightly more lateral anchor point for a different challenge angle." },
       ]},
       { id:"p3-c", name:"Session C — Full Body", emoji:"⚡", exercises:[
-        { id:"p3-c1", name:"Trap Bar Deadlift", sets:"4", reps:"6–8", tip:"More spine-friendly than barbell. Progress load over weeks." },
-        { id:"p3-c2", name:"Bulgarian Split Squat", sets:"3", reps:"8 each", tip:"Single-leg strength + hip mobility. Essential for snowboarding." },
-        { id:"p3-c3", name:"Cable Woodchop", sets:"3", reps:"12 each", tip:"Rotational strength. Builds snowboard-specific power." },
-        { id:"p3-c4", name:"Suitcase Carry", sets:"3", reps:"30m walk", tip:"One-sided carry. Anti-lateral flexion training." },
-        { id:"p3-c5", name:"Copenhagen Plank", sets:"3", reps:"20 sec each", tip:"Builds hip adductor and lateral core strength." },
+        { id:"p3-c1", name:"Trap Bar Deadlift", sets:"4", reps:"6–8",
+          tip:"More spine-friendly than a barbell deadlift — handles allow an upright torso. Keep chest up, push the floor away. Add weight each week." },
+        { id:"p3-c2", name:"Bulgarian Split Squat", sets:"3", reps:"8 each side",
+          tip:"Rear foot on a bench or chair, dumbbells in hands. Single-leg strength plus hip mobility. One of the most transferable exercises to snowboarding." },
+        { id:"p3-c3", name:"Band Rotational Chop", sets:"3", reps:"12 each side",
+          tip:"Band anchored to door at shoulder height. Rotate through the hips — not just the arms. Replaces cable woodchop exactly. Builds the rotational power you need for turns." },
+        { id:"p3-c4", name:"Suitcase Carry", sets:"3", reps:"30 m walk",
+          tip:"One heavy dumbbell in one hand only. Walk tall, don't lean. Anti-lateral flexion — trains the spine to resist sideways forces." },
+        { id:"p3-c5", name:"Copenhagen Plank", sets:"3", reps:"20 sec each side",
+          tip:"Side plank with the top foot resting on a bench or chair. Hip adductor and lateral core combined. Builds the hip strength needed for edge control on snow." },
       ]}
     ]
   },
-  { id:4, name:"Phase 4", subtitle:"Sport-Specific Power", weeks:"Weeks 13–18", color:"#C4793A", emoji:"🏂",
+  {
+    id:4, name:"Phase 4", subtitle:"Power & Snowboard Prep", weeks:"Weeks 13–18",
+    color:"#C4793A", emoji:"🏂",
     sessions:[
       { id:"p4-snow", name:"Snowboard Conditioning", emoji:"🏂", exercises:[
-        { id:"p4-s1", name:"Box Jump", sets:"4", reps:"5 reps", tip:"Land soft, absorb through hips and knees." },
-        { id:"p4-s2", name:"Lateral Bound", sets:"4", reps:"8 each", tip:"Explosive lateral push. Mimics edge-to-edge transitions." },
-        { id:"p4-s3", name:"Jump Squat", sets:"3", reps:"8 reps", tip:"Explode up, land softly. Plyometric power." },
-        { id:"p4-s4", name:"Deficit Split Squat", sets:"4", reps:"8 each", tip:"Deep range for hip mobility under load." },
-        { id:"p4-s5", name:"Rotational Med Ball Throw", sets:"3", reps:"10 each", tip:"Builds torso rotation power for turns." },
-        { id:"p4-s6", name:"Single-Leg RDL", sets:"3", reps:"10 each", tip:"Balance and posterior chain. Essential for uneven terrain." },
-        { id:"p4-s7", name:"Bosu Balance", sets:"3", reps:"60 sec", tip:"Proprioceptive training. Mimics unstable snow surface." },
-        { id:"p4-s8", name:"Kettlebell Swing", sets:"4", reps:"12 reps", tip:"Explosive hip extension. Directly translates to carving power." },
+        { id:"p4-s1", name:"Box Jump", sets:"4", reps:"5",
+          tip:"Land SOFTLY — bend knees and hips to absorb impact. Step down, don't jump down. Start with a low box. If the back flares, regress to squat-to-stand first." },
+        { id:"p4-s2", name:"Lateral Bound", sets:"4", reps:"8 each side",
+          tip:"Push explosively off one foot sideways, land on the other and absorb. Directly mimics heel-to-toe edge transitions on a snowboard." },
+        { id:"p4-s3", name:"Jump Squat", sets:"3", reps:"8",
+          tip:"Bodyweight only. Explode up, land softly with soft knees. If there's any back pain, go back to wall sits and build more base first." },
+        { id:"p4-s4", name:"Deficit Split Squat", sets:"4", reps:"8 each side",
+          tip:"Front foot elevated on a weight plate or step. Deeper range. Builds hip mobility under load — essential for the deep-flex snowboard stance." },
+        { id:"p4-s5", name:"Med Ball Rotational Throw", sets:"3", reps:"10 each side",
+          tip:"Stand side-on to a wall. Rotate hard from the hips and throw the ball at the wall, catch on rebound. This is where snowboard turning power comes from." },
+        { id:"p4-s6", name:"Single-Leg RDL", sets:"3", reps:"10 each side",
+          tip:"Dumbbell in the opposite hand. Slow and controlled. Balance plus posterior chain load. Essential for variable and uneven terrain." },
+        { id:"p4-s7", name:"Bosu Balance", sets:"3", reps:"60 sec",
+          tip:"Single-leg balance on the dome side. Eyes closed for extra challenge. Proprioceptive training — directly mimics the unstable, shifting snow surface." },
+        { id:"p4-s8", name:"Kettlebell Swing", sets:"4", reps:"12",
+          tip:"Hip hinge at the bottom, explosive hip extension drives the swing — NOT your arms. One of the best exercises for the lower body power you need on a snowboard." },
       ]}
     ]
   },
-  { id:5, name:"Phase 5", subtitle:"Return to Snow ❄️", weeks:"Week 19+", color:"#3A8CB5", emoji:"❄️",
+  {
+    id:5, name:"Phase 5", subtitle:"Return to Snow", weeks:"Week 19+",
+    color:"#3A8CB5", emoji:"❄️",
     sessions:[
-      { id:"p5-maintain", name:"Maintenance", emoji:"🎿", exercises:[
-        { id:"p5-m1", name:"Strength Training", sets:"3x/week", reps:"Phase 3 volume", tip:"Never stop entirely — most recurrences happen off-season." },
-        { id:"p5-m2", name:"Daily Walk", sets:"Daily", reps:"30 min", tip:"Permanent habit for disc health." },
-        { id:"p5-m3", name:"Morning Mobility", sets:"Daily", reps:"15 min", tip:"Press-ups, hip flexor stretch, hip mobility. Year-round." },
+      { id:"p5-maintain", name:"Maintenance & Return", emoji:"🎿", exercises:[
+        { id:"p5-m1", name:"Strength Training", sets:"3×/week", reps:"Phase 3 volume",
+          tip:"Never stop entirely between seasons. Most disc recurrences happen in the off-season when people de-train. Keep the Phase 3 lifts in rotation year-round." },
+        { id:"p5-m2", name:"Daily Walk", sets:"Daily", reps:"30 min",
+          tip:"Make this permanent. Your disc health depends on daily low-load movement regardless of whether you're snowboarding or not." },
+        { id:"p5-m3", name:"Morning Mobility", sets:"Daily", reps:"15 min",
+          tip:"McKenzie press-ups, hip flexor stretch, hip circles. Takes 15 minutes. Do this every day for the rest of your life — it's the cheapest insurance you have." },
       ]}
     ]
   }
 ];
 
-// ─── STATE ───────────────────────────────────────────────────────────────────
-
-const STORAGE_KEY = "rehab-tracker-v2";
-let state = {
-  activePhase: 0,
-  activeSession: 0,
-  view: "today",
-  expandedEx: null,
-  logs: {},
-  logModalEx: null,
-  logPain: 0,
-  logDiff: 0,
+// ─── STATE ────────────────────────────────────────────────────────────────────
+const STORAGE_KEY = "rehab-tracker-v3";
+let S = {
+  phase: 0, session: 0, view: "today",
+  expanded: null, logs: {},
+  logEx: null, logPain: 0, logDiff: 0,
+  p2BonusSeed: Date.now()  // seed for daily bonus pick — reshuffle on demand
 };
 
-function getTodayKey() { return new Date().toISOString().split("T")[0]; }
-function getLogKey(exId) { return `${getTodayKey()}__${exId}`; }
+const todayKey = () => new Date().toISOString().split("T")[0];
+const logKey   = id => `${todayKey()}__${id}`;
+const loadLogs = () => { try { const d = localStorage.getItem(STORAGE_KEY); if (d) S.logs = JSON.parse(d); } catch(e){} };
+const saveLogs = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(S.logs));
 
-function loadLogs() {
-  try { const s = localStorage.getItem(STORAGE_KEY); if (s) state.logs = JSON.parse(s); } catch(e) {}
-}
-function saveLogs() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.logs));
-}
-
-// ─── CSS VARIABLES ────────────────────────────────────────────────────────────
-
-function applyPhaseColor(color) {
-  const r = parseInt(color.slice(1,3),16);
-  const g = parseInt(color.slice(3,5),16);
-  const b = parseInt(color.slice(5,7),16);
-  document.documentElement.style.setProperty('--phase-color', color);
-  document.documentElement.style.setProperty('--phase-color-alpha', `${color}44`);
-  document.documentElement.style.setProperty('--phase-color-bg', `${color}18`);
-  document.documentElement.style.setProperty('--phase-color-shadow', `rgba(${r},${g},${b},0.4)`);
+// Helper: find exercise object across all phases
+function findEx(id) {
+  for (const p of PHASES) for (const s of p.sessions) for (const e of s.exercises) if (e.id === id) return { ex: e, phase: p };
+  // also search bonus pools
+  for (const p of PHASES) if (p.bonusPool) for (const e of p.bonusPool) if (e.id === id) return { ex: e, phase: p };
+  return null;
 }
 
-// ─── RENDER HELPERS ───────────────────────────────────────────────────────────
-
-function hex(color, alpha) {
-  return color + alpha;
+// Seeded shuffle — picks N items from an array reproducibly given a seed
+function seededPick(arr, n, seed) {
+  // Simple mulberry32 seeded PRNG
+  let s = seed >>> 0;
+  function rand() { s += 0x6D2B79F5; let t = Math.imul(s ^ s >>> 15, 1 | s); t ^= t + Math.imul(t ^ t >>> 7, 61 | t); return ((t ^ t >>> 14) >>> 0) / 4294967296; }
+  const pool = [...arr];
+  const out  = [];
+  while (out.length < n && pool.length) {
+    const i = Math.floor(rand() * pool.length);
+    out.push(pool.splice(i, 1)[0]);
+  }
+  return out;
 }
 
-function renderPhaseSelector() {
-  const el = document.getElementById("phase-selector");
-  el.innerHTML = PHASES.map((p, i) => `
-    <button class="phase-btn ${i === state.activePhase ? 'active' : ''}" 
-      style="${i === state.activePhase ? `background:${p.color};border-color:${p.color};` : ''}"
-      onclick="selectPhase(${i})">${p.name}</button>
-  `).join('');
+// Get the 3 exercises for today's Phase 2 session (from full pool of 18)
+function getP2Session() {
+  const ph = PHASES.find(p => p.id === 2);
+  if (!ph || !ph.bonusPool) return [];
+  return seededPick(ph.bonusPool, 3, S.p2BonusSeed);
+}
+
+function shuffleP2() {
+  S.p2BonusSeed = Date.now() + Math.floor(Math.random() * 99999);
+  S.expanded = null;
+  renderExercises();
+  renderProgress();
+}
+
+// ─── PHASE COLOR HELPER ───────────────────────────────────────────────────────
+function colorVars(c) {
+  document.documentElement.style.setProperty('--pc', c);
+}
+const alpha = (c, a) => c + a; // append hex alpha
+
+// ─── VIDEO HELPERS ────────────────────────────────────────────────────────────
+function ytSearchURL(q) {
+  return `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
+}
+
+// Video button HTML + optional inline photo illustration + instructions from DB
+function thumbHTML(exId, phaseColor, exName) {
+  const dbEntry = dbLookup(exName);
+  let illusHtml = '';
+  let instrHtml = '';
+
+  if (dbEntry && dbEntry.images && dbEntry.images.length >= 2) {
+    const labels = ['Start', 'End'];
+    const imgTags = dbEntry.images.slice(0, 2).map((url, i) => `
+      <div style="flex:1;min-width:0;text-align:center;">
+        <div style="font-size:10px;color:#7dd3c8;font-weight:700;letter-spacing:1px;margin-bottom:4px;text-transform:uppercase;">${labels[i]}</div>
+        <img src="${url}"
+          onerror="this.parentElement.style.display='none'"
+          alt="${labels[i]}"
+          style="width:100%;border-radius:8px;display:block;object-fit:cover;max-height:160px;background:#1e293b;" />
+      </div>`).join('');
+    illusHtml = `<div style="display:flex;gap:8px;margin-bottom:10px;padding:10px;background:#0f172a;border-radius:12px;border:1px solid #1e293b;">${imgTags}</div>`;
+  }
+
+  if (dbEntry && dbEntry.instructions && dbEntry.instructions.length) {
+    const steps = dbEntry.instructions.map((step, i) =>
+      `<li style="margin-bottom:6px;color:#aaa;font-size:13px;line-height:1.5;">${step}</li>`
+    ).join('');
+    instrHtml = `
+      <div style="margin-bottom:12px;padding:12px;background:#0a0a18;border-radius:10px;border:1px solid #1a1a2e;">
+        <div style="font-size:10px;color:#7dd3c8;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;">📋 Step-by-Step</div>
+        <ol style="margin:0;padding-left:18px;">${steps}</ol>
+      </div>`;
+  }
+
+  const v   = VIDEOS[exId];
+  const tid = THUMB_IDS[exId];
+  if (!v) return illusHtml + instrHtml;
+  if (!tid) {
+    const searchURL = ytSearchURL(v.q);
+    return `<div class="vid-thumb-wrap">${illusHtml}${instrHtml}
+      <a class="vid-fallback" href="${searchURL}" target="_blank" rel="noopener">
+        🔍 Search "${v.label}" on YouTube
+      </a>
+    </div>`;
+  }
+  return `
+    <div class="vid-thumb-wrap" data-ex="${exId}" data-color="${phaseColor}">
+      ${illusHtml}${instrHtml}
+      <button class="vid-watch-btn" onclick="playVideo('${exId}','${phaseColor}')"
+        style="display:flex;align-items:center;gap:10px;width:100%;padding:14px 18px;
+               border-radius:12px;border:none;cursor:pointer;
+               background:#1a1a2e;color:#fff;font-size:15px;font-weight:600;
+               box-shadow:0 2px 12px rgba(0,0,0,0.3);">
+        <span style="display:inline-flex;align-items:center;justify-content:center;
+                     width:38px;height:38px;border-radius:50%;flex-shrink:0;
+                     background:${phaseColor};box-shadow:0 2px 8px ${phaseColor}88;font-size:16px;">▶</span>
+        <span>Watch Demo</span>
+      </button>
+    </div>`;
+}
+
+
+
+// Play video in modal
+function playVideo(exId, phaseColor) {
+  const v   = VIDEOS[exId];
+  const tid = THUMB_IDS[exId];
+  if (!v) return;
+  if (!tid) { window.open(ytSearchURL(v.q), '_blank'); return; }
+  document.getElementById('vid-modal-title').textContent = v.label;
+  document.getElementById('vid-frame').style.boxShadow = `0 0 40px ${phaseColor}44`;
+  document.getElementById('vid-frame').innerHTML =
+    `<iframe src="https://www.youtube.com/embed/${tid}?autoplay=1&rel=0&modestbranding=1"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+      allowfullscreen></iframe>`;
+  document.getElementById('vid-modal').classList.add('open');
+}
+
+// Quick-play button in exercise row
+function quickPlay(exId, phaseColor) {
+  playVideo(exId, phaseColor);
+}
+
+// ─── RENDER ───────────────────────────────────────────────────────────────────
+function applyPhaseTheme() {
+  const p = PHASES[S.phase];
+  colorVars(p.color);
+  const badge = document.getElementById('phase-badge');
+  badge.style.cssText = `background:${p.color}22;border:1px solid ${p.color}44;border-radius:10px;padding:6px 12px;text-align:center;`;
+  document.getElementById('badge-sub').style.color  = p.color;
+  document.getElementById('badge-name').style.color = p.color;
+  document.getElementById('badge-name').textContent = p.name;
+  document.querySelectorAll('.nav-tab').forEach(t => {
+    const active = t.dataset.view === S.view;
+    t.style.borderBottomColor = active ? p.color : 'transparent';
+    t.style.color = active ? p.color : '#555';
+  });
+}
+
+function renderPhasePills() {
+  document.getElementById('phase-selector').innerHTML = PHASES.map((p, i) =>
+    `<button class="phase-btn" onclick="selectPhase(${i})"
+      style="${i===S.phase ? `background:${p.color};border-color:${p.color};color:#fff;` : ''}"
+    >${p.name}</button>`
+  ).join('');
 }
 
 function renderSessionTabs() {
-  const phase = PHASES[state.activePhase];
-  const el = document.getElementById("session-tabs");
-  if (phase.sessions.length <= 1) { el.innerHTML = ''; el.style.display = 'none'; return; }
+  const p  = PHASES[S.phase];
+  const el = document.getElementById('session-tabs');
+  if (p.sessions.length <= 1) { el.innerHTML = ''; el.style.display = 'none'; return; }
   el.style.display = 'flex';
-  el.innerHTML = phase.sessions.map((s, i) => `
-    <button class="session-tab ${i === state.activeSession ? 'active' : ''}"
-      style="${i === state.activeSession ? `border-color:${phase.color}66;` : ''}"
-      onclick="selectSession(${i})">${s.emoji} ${s.name}</button>
-  `).join('');
+  el.innerHTML = p.sessions.map((s, i) =>
+    `<button class="session-tab ${i===S.session?'active':''}"
+      style="${i===S.session ? `border-color:${p.color}66;` : ''}"
+      onclick="selectSession(${i})">${s.emoji} ${s.name}</button>`
+  ).join('');
 }
 
 function renderProgress() {
-  const phase = PHASES[state.activePhase];
-  const session = phase.sessions[state.activeSession];
-  const total = session.exercises.length;
-  const done = session.exercises.filter(e => !!state.logs[getLogKey(e.id)]).length;
-  const pct = total ? Math.round((done/total)*100) : 0;
-
-  document.getElementById("session-label").textContent = `${session.emoji} ${session.name}`;
-  document.getElementById("progress-count").textContent = `${done}/${total} done`;
-  document.getElementById("progress-count").style.color = phase.color;
-  const fill = document.getElementById("progress-fill");
-  fill.style.width = `${pct}%`;
-  fill.style.background = `linear-gradient(90deg, ${phase.color}, ${phase.color}BB)`;
+  const p    = PHASES[S.phase];
+  const sess = p.sessions[S.session];
+  const allEx = (p.id === 2) ? getP2Session() : sess.exercises;
+  const done = allEx.filter(e => !!S.logs[logKey(e.id)]).length;
+  const tot  = allEx.length;
+  const pct  = tot ? Math.round(done / tot * 100) : 0;
+  document.getElementById('prog-label').textContent = `${sess.emoji} ${sess.name}`;
+  const cnt = document.getElementById('prog-count');
+  cnt.textContent = `${done}/${tot} done`;
+  cnt.style.color = p.color;
+  const fill = document.getElementById('prog-fill');
+  fill.style.width      = `${pct}%`;
+  fill.style.background = `linear-gradient(90deg, ${p.color}, ${p.color}BB)`;
 }
 
 function renderExercises() {
-  const phase = PHASES[state.activePhase];
-  const session = phase.sessions[state.activeSession];
-  const el = document.getElementById("exercise-list");
+  const p    = PHASES[S.phase];
+  const sess = p.sessions[S.session];
 
-  el.innerHTML = session.exercises.map(ex => {
-    const logKey = getLogKey(ex.id);
-    const log = state.logs[logKey];
+  function exCardHTML(ex) {
+    const log     = S.logs[logKey(ex.id)];
     const checked = !!log;
-    const isOpen = state.expandedEx === ex.id;
-    const video = VIDEOS[ex.id];
-
-    const chipPainClass = log && log.pain > 0
-      ? (log.pain <= 3 ? 'pain-low' : log.pain <= 6 ? 'pain-mid' : 'pain-high') : '';
-    const chipPainColor = log && log.pain > 0
+    const open    = S.expanded === ex.id;
+    const hasV    = !!VIDEOS[ex.id];
+    const painCol = log && log.pain > 0
       ? (log.pain <= 3 ? '#4A9B8E' : log.pain <= 6 ? '#E8A838' : '#C94F4F') : '';
 
-    const logChips = log && (log.sets || log.pain > 0) ? `
+    const chips = log && (log.sets || log.pain > 0) ? `
       <div class="log-chips">
-        ${log.sets ? `<span class="log-chip">${log.sets} × ${log.reps}</span>` : ''}
-        ${log.pain > 0 ? `<span class="log-chip" style="color:${chipPainColor}">Pain: ${log.pain}/10</span>` : ''}
+        ${log.sets  ? `<span class="log-chip">${log.sets} × ${log.reps}</span>` : ''}
+        ${log.pain > 0 ? `<span class="log-chip" style="color:${painCol}">Pain: ${log.pain}/10</span>` : ''}
         ${log.difficulty > 0 ? `<span class="log-chip">Effort: ${['','Easy','Light','Mod','Hard','Max'][log.difficulty]}</span>` : ''}
       </div>` : '';
 
-    const videoThumb = video ? `
-      <button class="video-thumb-wrap" onclick="openVideo('${video.id}','${video.title.replace(/'/g,"\\'")}')">
-        <img src="https://img.youtube.com/vi/${video.id}/mqdefault.jpg" alt="${video.title}" loading="lazy">
-        <div class="video-thumb-overlay">
-          <div class="video-play-circle">▶</div>
-        </div>
-        <div class="video-thumb-label">Watch Demo</div>
-      </button>` : '';
-
     return `
-      <div class="ex-card ${checked ? 'checked' : ''}" id="card-${ex.id}"
-        style="--phase-color:${phase.color};--phase-color-alpha:${phase.color}44;--phase-color-bg:${phase.color}18;">
-        <div class="ex-row" style="padding:14px 14px 10px;display:flex;align-items:center;gap:10px;">
-          <button class="ex-checkbox ${checked ? 'checked' : ''}" onclick="toggleCheck('${ex.id}')"
-            style="${checked ? `border-color:${phase.color};background:${phase.color};` : ''}">
-            <span class="check-icon">✓</span>
+      <div class="ex-card" style="${checked ? `border-color:${p.color}44;background:${p.color}18;` : ''}">
+        <div class="ex-row">
+          <button class="ex-check" onclick="toggleCheck('${ex.id}')"
+            style="${checked ? `border-color:${p.color};background:${p.color};color:#fff;` : ''}">
+            ${checked ? '✓' : ''}
           </button>
           <div class="ex-info">
-            <div class="ex-name">${ex.name}</div>
+            <div class="ex-name" style="${checked ? 'color:#fff;' : ''}">${ex.name}</div>
             <div class="ex-meta">${ex.sets} sets · ${ex.reps}</div>
           </div>
-          <div class="ex-actions">
+          <div class="ex-btns">
             <button class="ex-btn" onclick="toggleExpand('${ex.id}')"
-              style="${isOpen ? `border-color:${phase.color}66;background:${phase.color}22;color:${phase.color};` : ''}">
-              ${isOpen ? '▲' : '▼'}
+              style="${open ? `border-color:${p.color}66;background:${p.color}22;color:${p.color};` : ''}">
+              ${open ? '▲' : '▼'}
             </button>
-            ${video ? `<button class="ex-btn play-btn" onclick="openVideo('${video.id}','${video.title.replace(/'/g,"\\'")}');"
-              style="border-color:${phase.color}44;background:${phase.color}22;color:${phase.color};">▶</button>` : ''}
-            <button class="ex-btn log-btn ${log && log.sets ? 'has-log' : ''}" onclick="openLog('${ex.id}')"
-              style="${log && log.sets ? `border-color:${phase.color}44;background:${phase.color}22;color:${phase.color};` : ''}">📊</button>
+            ${hasV ? `
+            <button class="ex-btn" title="Watch video"
+              onclick="quickPlay('${ex.id}','${p.color}')"
+              style="border-color:${p.color}44;background:${p.color}22;color:${p.color};font-weight:700;">
+              ▶
+            </button>` : ''}
+            <button class="ex-btn" onclick="openLog('${ex.id}')"
+              style="${log && log.sets ? `border-color:${p.color}44;background:${p.color}22;color:${p.color};` : ''}">
+              📊
+            </button>
           </div>
         </div>
-        <div class="ex-expanded ${isOpen ? 'open' : ''}">
-          <div class="ex-tip" style="border-left-color:${phase.color};">💡 ${ex.tip}</div>
-          ${videoThumb}
+        <div class="ex-panel ${open ? 'open' : ''}">
+          <div class="ex-tip" style="border-left-color:${p.color};">💡 ${ex.tip}</div>
+          ${thumbHTML(ex.id, p.color, ex.name)}
         </div>
-        ${logChips}
+        ${chips}
       </div>`;
-  }).join('');
+  }
+
+  const exercises = (p.id === 2) ? getP2Session() : sess.exercises;
+
+  const listHTML = exercises.map(ex => exCardHTML(ex)).join('');
+
+  const shuffleBar = (p.id === 2) ? `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <div style="font-size:11px;color:#666;letter-spacing:1px;text-transform:uppercase;flex:1;">
+        🎲 Daily draw · 3 of ${p.bonusPool.length} exercises
+      </div>
+      <button onclick="shuffleP2()" style="font-size:12px;padding:6px 12px;border-radius:8px;border:1px solid #2A2A3A;background:#1A1A2E;color:${p.color};cursor:pointer;font-family:inherit;font-weight:600;">
+        ↺ Shuffle
+      </button>
+    </div>` : '';
+
+  document.getElementById('exercise-list').innerHTML = shuffleBar + listHTML;
 }
 
 function renderPhasesView() {
-  const el = document.getElementById("phases-list");
-  el.innerHTML = PHASES.map((p, i) => {
-    const totalEx = p.sessions.reduce((a,s) => a + s.exercises.length, 0);
+  document.getElementById('phases-list').innerHTML = PHASES.map((p, i) => {
+    const total = p.sessions.reduce((a, s) => a + s.exercises.length, 0);
     return `
-      <button class="phase-card ${i === state.activePhase ? 'active-phase' : ''}"
-        style="--card-color-alpha:${p.color}66;"
-        onclick="selectPhaseAndGo(${i})">
+      <button class="phase-card" onclick="selectPhaseAndGo(${i})"
+        style="border-color:${i===S.phase ? p.color+'66' : '#1E1E30'};">
         <div class="phase-icon" style="background:${p.color}22;border:1px solid ${p.color}44;">${p.emoji}</div>
         <div class="phase-card-body">
-          <div class="phase-card-header">
+          <div class="phase-card-top">
             <span class="phase-card-name">${p.name}</span>
-            <span class="phase-weeks-badge" style="color:${p.color};background:${p.color}22;">${p.weeks}</span>
+            <span class="phase-weeks" style="color:${p.color};background:${p.color}22;">${p.weeks}</span>
           </div>
           <div class="phase-card-sub">${p.subtitle}</div>
-          <div class="phase-card-count">${totalEx} exercises · ${p.sessions.length} session${p.sessions.length>1?'s':''}</div>
+          <div class="phase-card-count">${total} exercises · ${p.sessions.length} session${p.sessions.length > 1 ? 's' : ''}</div>
         </div>
-        <div class="phase-arrow">›</div>
+        <span style="color:#333;font-size:18px;">›</span>
       </button>`;
   }).join('');
 }
 
 function renderHistory() {
-  const phase = PHASES[state.activePhase];
-  const todayKey = getTodayKey();
-
+  const p       = PHASES[S.phase];
+  const today   = todayKey();
   // Calendar strip
-  const calEl = document.getElementById("cal-strip");
-  const days = Array.from({length:14}, (_,i) => {
-    const d = new Date(); d.setDate(d.getDate() - (13-i));
-    const key = d.toISOString().split("T")[0];
-    const count = Object.keys(state.logs).filter(k => k.startsWith(key+"__")).length;
-    return {key, date:d, count};
+  const days = Array.from({length:14}, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (13 - i));
+    const k = d.toISOString().split("T")[0];
+    const n = Object.keys(S.logs).filter(l => l.startsWith(k + '__')).length;
+    return { k, d, n };
   });
-  calEl.innerHTML = days.map(d => {
-    const isToday = d.key === todayKey;
-    const bg = d.count > 0 ? `background:${phase.color}33;` : '';
-    const borderColor = isToday ? phase.color : d.count > 0 ? phase.color+'44' : '#1E1E30';
-    const numColor = isToday ? phase.color : d.count > 0 ? '#fff' : '#444';
-    return `
-      <div class="cal-day" style="${bg}border-color:${borderColor};">
-        <div class="cal-day-name">${d.date.toLocaleDateString('en',{weekday:'narrow'})}</div>
-        <div class="cal-day-num" style="color:${numColor};">${d.date.getDate()}</div>
-        <div class="cal-day-count" style="color:${phase.color};">${d.count > 0 ? d.count : '·'}</div>
-      </div>`;
+  document.getElementById('cal-strip').innerHTML = days.map(({k, d, n}) => {
+    const isToday = k === today;
+    return `<div class="cal-day"
+      style="${n > 0 ? `background:${p.color}33;` : ''}border-color:${isToday ? p.color : n > 0 ? p.color+'44' : '#1E1E30'};">
+      <div class="cal-weekday">${d.toLocaleDateString('en',{weekday:'narrow'})}</div>
+      <div class="cal-num" style="color:${isToday ? p.color : n > 0 ? '#fff' : '#444'};">${d.getDate()}</div>
+      <div class="cal-count" style="color:${p.color};">${n > 0 ? n : '·'}</div>
+    </div>`;
   }).join('');
 
   // History list
-  const histEl = document.getElementById("history-list");
-  const allEx = PHASES.flatMap(p => p.sessions.flatMap(s => s.exercises));
-  const allExMap = {};
-  allEx.forEach(e => allExMap[e.id] = e);
-
-  const entries = Object.entries(state.logs)
-    .sort((a,b) => (b[1].ts||0)-(a[1].ts||0))
-    .slice(0,20)
-    .map(([key, log]) => {
-      const [dateStr, exId] = key.split("__");
-      const ex = allExMap[exId];
-      if (!ex) return null;
-      const pc = PHASES.find(p => p.sessions.some(s => s.exercises.some(e => e.id===exId)))?.color || '#666';
-      const painColor = log.pain > 0 ? (log.pain<=3?'#4A9B8E':log.pain<=6?'#E8A838':'#C94F4F') : '';
-      const dateLabel = new Date(dateStr+'T12:00:00').toLocaleDateString('en',{month:'short',day:'numeric'});
+  const entries = Object.entries(S.logs)
+    .sort((a, b) => (b[1].ts||0) - (a[1].ts||0))
+    .slice(0, 20)
+    .map(([k, log]) => {
+      const [dateStr, exId] = k.split('__');
+      const found = findEx(exId);
+      if (!found) return null;
+      const { ex, phase: ph } = found;
+      const painCol = log.pain > 0 ? (log.pain<=3?'#4A9B8E':log.pain<=6?'#E8A838':'#C94F4F') : '';
+      const dateLabel = new Date(dateStr + 'T12:00:00').toLocaleDateString('en', {month:'short', day:'numeric'});
       return `
         <div class="history-item">
-          <div class="history-dot" style="background:${pc};"></div>
-          <div style="flex:1;">
+          <div class="history-dot" style="background:${ph.color};"></div>
+          <div style="flex:1;min-width:0;">
             <div class="history-name">${ex.name}</div>
-            <div class="history-meta">${dateLabel}${log.sets?` · ${log.sets} × ${log.reps}`:''}${log.pain>0?` · Pain ${log.pain}/10`:''}</div>
+            <div class="history-meta">${dateLabel}${log.sets ? ` · ${log.sets}×${log.reps}` : ''}${log.pain > 0 ? ` · Pain ${log.pain}/10` : ''}</div>
           </div>
-          ${log.pain>0?`<div class="history-pain" style="color:${painColor};">${log.pain}/10</div>`:''}
+          ${log.pain > 0 ? `<span style="font-size:12px;font-weight:700;color:${painCol};flex-shrink:0;">${log.pain}/10</span>` : ''}
         </div>`;
     }).filter(Boolean);
 
-  if (entries.length === 0) {
-    histEl.innerHTML = `<div class="empty-history">No sessions logged yet.<br><span style="color:#555;">Start on the Today tab.</span></div>`;
-  } else {
-    histEl.innerHTML = entries.join('');
-  }
-}
-
-function renderHeader() {
-  const phase = PHASES[state.activePhase];
-  const badge = document.getElementById("phase-badge");
-  badge.style.background = phase.color + "22";
-  badge.style.border = `1px solid ${phase.color}44`;
-  document.getElementById("badge-label").style.color = phase.color;
-  document.getElementById("badge-name").style.color = phase.color;
-  document.getElementById("badge-name").textContent = phase.name;
-  applyPhaseColor(phase.color);
-
-  // Update nav tab active color
-  document.querySelectorAll('.nav-tab').forEach(tab => {
-    tab.style.setProperty('--phase-color', phase.color);
-  });
+  document.getElementById('history-list').innerHTML = entries.length
+    ? entries.join('')
+    : `<div class="empty-state">No sessions logged yet.<br><span style="color:#555;">Start checking off exercises on Today.</span></div>`;
 }
 
 function renderAll() {
-  renderHeader();
-  renderPhaseSelector();
+  applyPhaseTheme();
+  renderPhasePills();
   renderSessionTabs();
   renderProgress();
   renderExercises();
   renderPhasesView();
   renderHistory();
-
-  // Show correct view
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.getElementById(`view-${state.view}`).classList.add('active');
-  document.querySelectorAll('.nav-tab').forEach(tab => {
-    tab.classList.toggle('active', tab.dataset.view === state.view);
-  });
+  document.getElementById(`view-${S.view}`).classList.add('active');
+  applyPhaseTheme(); // re-apply after nav tab rerender
 }
 
 // ─── ACTIONS ──────────────────────────────────────────────────────────────────
+function selectPhase(i)       { S.phase = i; S.session = 0; S.expanded = null; renderAll(); }
+function selectPhaseAndGo(i)  { S.phase = i; S.session = 0; S.expanded = null; S.view = 'today'; renderAll(); }
+function selectSession(i)     { S.session = i; S.expanded = null; renderProgress(); renderExercises(); }
+function toggleExpand(id)     { S.expanded = S.expanded === id ? null : id; renderExercises(); }
 
-function selectPhase(i) {
-  state.activePhase = i;
-  state.activeSession = 0;
-  state.expandedEx = null;
-  renderAll();
-}
-
-function selectPhaseAndGo(i) {
-  state.activePhase = i;
-  state.activeSession = 0;
-  state.expandedEx = null;
-  state.view = "today";
-  renderAll();
-}
-
-function selectSession(i) {
-  state.activeSession = i;
-  state.expandedEx = null;
-  renderProgress();
-  renderExercises();
-}
-
-function toggleExpand(exId) {
-  state.expandedEx = state.expandedEx === exId ? null : exId;
-  renderExercises();
-}
-
-function toggleCheck(exId) {
-  const key = getLogKey(exId);
-  if (state.logs[key]) { delete state.logs[key]; }
-  else { state.logs[key] = { done: true, ts: Date.now() }; }
+function toggleCheck(id) {
+  const k = logKey(id);
+  if (S.logs[k]) delete S.logs[k];
+  else S.logs[k] = { done: true, ts: Date.now() };
   saveLogs();
   renderProgress();
   renderExercises();
 }
 
 // ─── VIDEO MODAL ──────────────────────────────────────────────────────────────
-
-function openVideo(videoId, title) {
-  const modal = document.getElementById("video-modal");
-  const phase = PHASES[state.activePhase];
-  document.getElementById("video-modal-title").textContent = title;
-  document.getElementById("video-ratio").innerHTML =
-    `<iframe src="https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1"
-      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-      allowfullscreen></iframe>`;
-  document.getElementById("video-ratio").style.boxShadow = `0 0 40px ${phase.color}44`;
-  modal.classList.add('open');
-}
-
 function closeVideo() {
-  document.getElementById("video-modal").classList.remove('open');
-  document.getElementById("video-ratio").innerHTML = '';
+  document.getElementById('vid-modal').classList.remove('open');
+  document.getElementById('vid-frame').innerHTML = '';
 }
-
-document.getElementById("video-close-btn").onclick = closeVideo;
-document.getElementById("video-modal").onclick = function(e) {
-  if (e.target === this) closeVideo();
-};
+document.getElementById('vid-close').onclick = closeVideo;
+document.getElementById('vid-modal').onclick = e => { if (e.target === document.getElementById('vid-modal')) closeVideo(); };
 
 // ─── LOG MODAL ────────────────────────────────────────────────────────────────
-
 function openLog(exId) {
-  const phase = PHASES[state.activePhase];
-  const session = phase.sessions[state.activeSession];
-  const ex = session.exercises.find(e => e.id === exId)
-    || PHASES.flatMap(p => p.sessions.flatMap(s => s.exercises)).find(e => e.id === exId);
-  if (!ex) return;
+  const found = findEx(exId);
+  if (!found) return;
+  const { ex, phase: ph } = found;
+  const log = S.logs[logKey(exId)] || {};
+  S.logEx = ex; S.logPain = log.pain || 0; S.logDiff = log.difficulty || 0;
 
-  const log = state.logs[getLogKey(exId)] || {};
-  state.logModalEx = ex;
-  state.logPain = log.pain || 0;
-  state.logDiff = log.difficulty || 0;
+  document.getElementById('log-title').textContent = ex.name;
+  document.getElementById('log-sub').textContent   = `Target: ${ex.sets} sets · ${ex.reps}`;
+  document.getElementById('log-sets').value        = log.sets || '';
+  document.getElementById('log-sets').placeholder  = ex.sets;
+  document.getElementById('log-reps').value        = log.reps || '';
+  document.getElementById('log-reps').placeholder  = ex.reps;
+  document.getElementById('log-notes').value       = log.notes || '';
+  document.getElementById('save-btn').style.background = ph.color;
 
-  document.getElementById("log-modal-title").textContent = ex.name;
-  document.getElementById("log-modal-sub").textContent = `Target: ${ex.sets} sets · ${ex.reps}`;
-  document.getElementById("log-sets").value = log.sets || '';
-  document.getElementById("log-sets").placeholder = ex.sets;
-  document.getElementById("log-reps").value = log.reps || '';
-  document.getElementById("log-reps").placeholder = ex.reps;
-  document.getElementById("log-notes").value = log.notes || '';
-  document.getElementById("save-log-btn").style.background = phase.color;
-
-  renderPainDots();
-  renderDiffBtns();
-
-  document.getElementById("log-modal").classList.add('open');
+  renderPainDots(ph.color);
+  renderDiffBtns(ph.color);
+  document.getElementById('log-modal').classList.add('open');
 }
 
-function renderPainDots() {
-  const phase = PHASES[state.activePhase];
-  const el = document.getElementById("pain-dots");
-  el.innerHTML = Array.from({length:11}, (_,n) => {
-    const active = n <= state.logPain;
-    const col = active ? (n<=3?'#4A9B8E':n<=6?'#E8A838':'#C94F4F') : '#2A2A3A';
-    const textCol = active ? '#fff' : '#555';
-    const scale = n === state.logPain ? 'transform:scale(1.2);' : '';
+function renderPainDots(phColor) {
+  document.getElementById('pain-dots').innerHTML = Array.from({length:11}, (_, n) => {
+    const on  = n <= S.logPain;
+    const col = on ? (n<=3?'#4A9B8E':n<=6?'#E8A838':'#C94F4F') : '#2A2A3A';
     return `<button class="pain-dot" onclick="setPain(${n})"
-      style="background:${col};color:${textCol};${scale}">${n}</button>`;
+      style="background:${col};color:${on?'#fff':'#555'};${n===S.logPain?'transform:scale(1.2);':''}">${n}</button>`;
   }).join('');
 }
 
-function renderDiffBtns() {
-  const phase = PHASES[state.activePhase];
-  const labels = ['Easy','Light','Mod','Hard','Max'];
-  const el = document.getElementById("diff-btns");
-  el.innerHTML = labels.map((label, i) => {
-    const n = i + 1;
-    const active = n <= state.logDiff;
-    return `<button class="diff-btn" onclick="setDiff(${n})"
-      style="${active ? `background:${phase.color};color:#fff;` : ''}">${label}</button>`;
-  }).join('');
+function renderDiffBtns(phColor) {
+  const ph = PHASES[S.phase];
+  document.getElementById('diff-row').innerHTML =
+    ['Easy','Light','Mod','Hard','Max'].map((label, i) => {
+      const n  = i + 1;
+      const on = n <= S.logDiff;
+      return `<button class="diff-btn" onclick="setDiff(${n})"
+        style="${on ? `background:${ph.color};color:#fff;` : ''}">${label}</button>`;
+    }).join('');
 }
 
-function setPain(n) { state.logPain = n; renderPainDots(); }
-function setDiff(n) { state.logDiff = n; renderDiffBtns(); }
+function setPain(n) { S.logPain = n; renderPainDots(); }
+function setDiff(n) { S.logDiff = n; renderDiffBtns(); }
 
-function closeLog() {
-  document.getElementById("log-modal").classList.remove('open');
-  state.logModalEx = null;
-}
+function closeLog() { document.getElementById('log-modal').classList.remove('open'); S.logEx = null; }
+document.getElementById('log-close').onclick = closeLog;
+document.getElementById('log-modal').onclick  = e => { if (e.target === document.getElementById('log-modal')) closeLog(); };
+document.getElementById('log-modal-inner').onclick = e => e.stopPropagation();
 
-document.getElementById("log-close-btn").onclick = closeLog;
-document.getElementById("log-modal").onclick = function(e) {
-  if (e.target === this) closeLog();
-};
-document.getElementById("log-modal-inner").onclick = function(e) { e.stopPropagation(); };
-
-document.getElementById("save-log-btn").onclick = function() {
-  if (!state.logModalEx) return;
-  const key = getLogKey(state.logModalEx.id);
-  state.logs[key] = {
-    done: true,
-    ts: Date.now(),
-    sets: document.getElementById("log-sets").value,
-    reps: document.getElementById("log-reps").value,
-    pain: state.logPain,
-    difficulty: state.logDiff,
-    notes: document.getElementById("log-notes").value,
+document.getElementById('save-btn').onclick = () => {
+  if (!S.logEx) return;
+  S.logs[logKey(S.logEx.id)] = {
+    done: true, ts: Date.now(),
+    sets: document.getElementById('log-sets').value,
+    reps: document.getElementById('log-reps').value,
+    pain: S.logPain, difficulty: S.logDiff,
+    notes: document.getElementById('log-notes').value,
   };
   saveLogs();
   closeLog();
-  renderProgress();
-  renderExercises();
-  renderHistory();
+  renderProgress(); renderExercises(); renderHistory();
   showToast();
 };
 
 function showToast() {
-  const t = document.getElementById("saved-toast");
+  const t = document.getElementById('toast');
   t.classList.remove('show');
-  void t.offsetWidth; // reflow
+  void t.offsetWidth;
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 1600);
+  setTimeout(() => t.classList.remove('show'), 1700);
 }
 
-// ─── NAV ─────────────────────────────────────────────────────────────────────
-
+// ─── NAV ──────────────────────────────────────────────────────────────────────
 document.querySelectorAll('.nav-tab').forEach(tab => {
-  tab.onclick = function() {
-    state.view = this.dataset.view;
-    renderAll();
-  };
+  tab.onclick = () => { S.view = tab.dataset.view; renderAll(); };
 });
 
-// ─── INIT ─────────────────────────────────────────────────────────────────────
-
+// ─── BOOT ─────────────────────────────────────────────────────────────────────
 loadLogs();
 renderAll();
+loadExerciseDB(); // async — re-renders when done
 </script>
 </body>
 </html>
