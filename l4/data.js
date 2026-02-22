@@ -1,0 +1,275 @@
+// ─── VIDEOS ───────────────────────────────────────────────────────────────────
+// Stored as YouTube search queries so they always find a result even if a
+// specific video gets taken down. The onerror handler shows a search link.
+const VIDEOS = {
+  // Phase 1 — McKenzie & rehab basics
+  "p1-m1": { q: "prone lying back pain McKenzie", label: "Prone Lying" },
+  "p1-m2": { q: "McKenzie press up prone back pain exercise", label: "McKenzie Press-Up" },
+  "p1-m3": { q: "single knee to chest stretch low back pain", label: "Knee-to-Chest Stretch" },
+  "p1-m4": { q: "glute bridge exercise low back pain tutorial", label: "Glute Bridge" },
+  "p1-e1": { q: "cat cow stretch lower back yoga", label: "Cat-Cow" },
+  "p1-e2": { q: "kneeling hip flexor stretch lower back", label: "Hip Flexor Stretch" },
+  "p1-e3": { q: "piriformis stretch figure four lying back", label: "Piriformis Stretch" },
+  "p1-d1": { q: "walking exercise lower back pain relief", label: "Walking for Back Health" },
+  // Phase 2 — core stability
+  "p2-s1": { q: "bird dog exercise core stability tutorial", label: "Bird-Dog" },
+  "p2-s2": { q: "dead bug exercise core low back", label: "Dead Bug" },
+  "p2-s3": { q: "side lying clamshell resistance band glute medius", label: "Side-Lying Clam" },
+  "p2-s4": { q: "single leg glute bridge tutorial", label: "Single-Leg Glute Bridge" },
+  "p2-s5": { q: "wall sit exercise proper form", label: "Wall Sit" },
+  "p2-s6": { q: "pallof press resistance band anti rotation core", label: "Pallof Press (Band)" },
+  // Phase 2 — BONUS POOL
+  "p2-x1":  { q: "McGill curl up core stability low back", label: "McGill Curl-Up" },
+  "p2-x2":  { q: "side plank exercise proper form back pain", label: "Side Plank" },
+  "p2-x3":  { q: "superman exercise lower back strengthening", label: "Superman Hold" },
+  "p2-x4":  { q: "prone hip extension exercise glute low back", label: "Prone Hip Extension" },
+  "p2-x5":  { q: "hollow body hold core exercise tutorial", label: "Hollow Body Hold" },
+  "p2-x6":  { q: "fire hydrant exercise glute hip tutorial", label: "Fire Hydrant" },
+  "p2-x7":  { q: "quadruped hip extension donkey kick tutorial", label: "Donkey Kick" },
+  "p2-x8":  { q: "plank shoulder tap core stability exercise", label: "Plank Shoulder Tap" },
+  "p2-x9":  { q: "reverse snow angel prone exercise lower back", label: "Prone Snow Angel" },
+  "p2-x10": { q: "suitcase hold isometric core exercise dumbbell", label: "Suitcase Hold (Isometric)" },
+  "p2-x11": { q: "hip abduction side lying band exercise", label: "Side-Lying Hip Abduction" },
+  "p2-x12": { q: "glute bridge march exercise core stability", label: "Glute Bridge March" },
+  // Phase 3A — lower body
+  "p3-a1": { q: "Romanian deadlift dumbbell proper form tutorial", label: "Dumbbell Romanian Deadlift" },
+  "p3-a2": { q: "goblet squat dumbbell tutorial form", label: "Goblet Squat" },
+  "p3-a3": { q: "dumbbell step up exercise tutorial", label: "Weighted Step-Up" },
+  "p3-a4": { q: "nordic hamstring curl at home no equipment", label: "Nordic Hamstring Curl" },
+  "p3-a5": { q: "single leg glute bridge weighted dumbbell", label: "Single-Leg Glute Bridge" },
+  // Phase 3B — upper/core
+  "p3-b1": { q: "pull up tutorial beginner lat pulldown band", label: "Pull-Up / Band-Assisted" },
+  "p3-b2": { q: "single arm dumbbell row tutorial form", label: "Single-Arm Dumbbell Row" },
+  "p3-b3": { q: "push up proper form tutorial", label: "Push-Up" },
+  "p3-b4": { q: "farmer carry dumbbell tutorial", label: "Dumbbell Farmer Carry" },
+  "p3-b5": { q: "pallof press band anti rotation core", label: "Pallof Press (Band)" },
+  // Phase 3C — full body
+  "p3-c1": { q: "trap bar deadlift hex bar tutorial form", label: "Trap Bar Deadlift" },
+  "p3-c2": { q: "bulgarian split squat dumbbell tutorial", label: "Bulgarian Split Squat" },
+  "p3-c3": { q: "resistance band rotational chop exercise core", label: "Band Rotational Chop" },
+  "p3-c4": { q: "suitcase carry dumbbell lateral core", label: "Suitcase Carry" },
+  "p3-c5": { q: "copenhagen plank hip adductor tutorial", label: "Copenhagen Plank" },
+  // Phase 4 — power/sport
+  "p4-s1": { q: "box jump tutorial beginner landing technique", label: "Box Jump" },
+  "p4-s2": { q: "lateral bound skater jump exercise", label: "Lateral Bound" },
+  "p4-s3": { q: "jump squat bodyweight tutorial", label: "Jump Squat" },
+  "p4-s4": { q: "deficit split squat front foot elevated dumbbell", label: "Deficit Split Squat" },
+  "p4-s5": { q: "rotational medicine ball throw wall", label: "Med Ball Rotational Throw" },
+  "p4-s6": { q: "single leg RDL dumbbell balance tutorial", label: "Single-Leg RDL" },
+  "p4-s7": { q: "bosu ball single leg balance proprioception", label: "Bosu Balance" },
+  "p4-s8": { q: "kettlebell swing tutorial hip hinge", label: "Kettlebell Swing" },
+  // Phase 5
+  "p5-m1": { q: "strength training lower body dumbbell home workout", label: "Strength Session" },
+  "p5-m2": { q: "walking exercise daily habit back health", label: "Daily Walk" },
+  "p5-m3": { q: "morning mobility routine lower back hips", label: "Morning Mobility" },
+};
+
+// ─── THUMB IDS ────────────────────────────────────────────────────────────────
+// Verified YouTube video IDs for thumbnails. If any ID ever 404s, the onerror
+// fallback automatically switches to a YouTube search link instead.
+const THUMB_IDS = {
+  // Phase 1 — verified from askdoctorjo.com page source
+  "p1-m1": "kyEF16tBBxo",
+  "p1-m2": "kyEF16tBBxo",
+  "p1-m3": "bpA7mnxH5Ss",
+  "p1-m4": "yvPjVYFx3Ss",
+  "p1-e1": "bpA7mnxH5Ss",
+  "p1-e2": "7bRaX6M2nr8",
+  "p1-e3": "qKniTOK7HQs",
+  "p1-d1": "bpA7mnxH5Ss",
+  // Phase 2
+  "p2-s1": "yvPjVYFx3Ss",
+  "p2-s2": "yvPjVYFx3Ss",
+  "p2-s3": "qKniTOK7HQs",
+  "p2-s4": "yvPjVYFx3Ss",
+  "p2-s5": "y-wV4Venusw",
+  "p2-s6": "AKed5fMRNLQ",
+  // Phase 2 bonus pool
+  "p2-x1":  "yvPjVYFx3Ss",
+  "p2-x2":  "AKed5fMRNLQ",
+  "p2-x3":  "qKniTOK7HQs",
+  "p2-x4":  "qKniTOK7HQs",
+  "p2-x5":  "AKed5fMRNLQ",
+  "p2-x6":  "qKniTOK7HQs",
+  "p2-x7":  "qKniTOK7HQs",
+  "p2-x8":  "AKed5fMRNLQ",
+  "p2-x9":  "yvPjVYFx3Ss",
+  "p2-x10": "AKed5fMRNLQ",
+  "p2-x11": "qKniTOK7HQs",
+  "p2-x12": "yvPjVYFx3Ss",
+  // Phase 3
+  "p3-a1": "jEy_czb3RKA",
+  "p3-a2": "MxsFDhcyFyE",
+  "p3-a3": "dQqApCGd5Ss",
+  "p3-a4": "3bSqDOReFUs",
+  "p3-a5": "yvPjVYFx3Ss",
+  "p3-b1": "eGo4IYlbE5g",
+  "p3-b2": "ZFn4HGQTKJM",
+  "p3-b3": "IODxDxX7oi4",
+  "p3-b4": "rt17lmnaLSM",
+  "p3-b5": "AKed5fMRNLQ",
+  "p3-c1": "XxWcirHIwVo",
+  "p3-c2": "2C-uNgKwPLE",
+  "p3-c3": "L1lmuyq9Uf4",
+  "p3-c4": "rt17lmnaLSM",
+  "p3-c5": "lgFBNr0tnPs",
+  // Phase 4
+  "p4-s1": "cPyLSQ6dMYQ",
+  "p4-s2": "8BFtXOFqVz8",
+  "p4-s3": "A-cFYWvaHr0",
+  "p4-s4": "2C-uNgKwPLE",
+  "p4-s5": "HPEpDCOHDsk",
+  "p4-s6": "UN-VqpqHzrQ",
+  "p4-s7": "AFoqaivFEpg",
+  "p4-s8": "mKDIuUbH94Q",
+  // Phase 5
+  "p5-m1": "yvPjVYFx3Ss",
+  "p5-m2": "bpA7mnxH5Ss",
+  "p5-m3": "kyEF16tBBxo",
+};
+
+// ─── PHASES ───────────────────────────────────────────────────────────────────
+const PHASES = [
+  {
+    id:1, name:"Phase 1", subtitle:"Pain Relief & Movement", weeks:"Weeks 1–3",
+    color:"#4A9B8E", emoji:"🌱",
+    sessions:[
+      { id:"p1-morning", name:"Morning Session", emoji:"🌅", exercises:[
+        { id:"p1-m1", name:"Prone Lying", sets:"1", reps:"5 min",
+          tip:"Lie face-down on the floor. Just rest here. Passive lumbar extension — lets the disc settle. A pillow under hips reduces discomfort if needed." },
+        { id:"p1-m2", name:"McKenzie Press-Up", sets:"2", reps:"10 reps",
+          tip:"Hands under shoulders, press upper body up, hips stay on floor. If pain travels DOWN the leg — stop. If it travels UP toward the back — that's centralisation, a great sign." },
+        { id:"p1-m3", name:"Single Knee-to-Chest", sets:"1", reps:"30 sec each side",
+          tip:"One leg only — NOT both together (that loads the disc). Gentle pull to comfortable stretch." },
+        { id:"p1-m4", name:"Glute Bridge", sets:"3", reps:"10 reps",
+          tip:"Feet flat, squeeze glutes FIRST then lift hips. Don't overarch at the top. Spine neutral. Feel it in your glutes, not your lower back." },
+      ]},
+      { id:"p1-evening", name:"Evening Session", emoji:"🌙", exercises:[
+        { id:"p1-e1", name:"Cat-Cow", sets:"2", reps:"10 reps",
+          tip:"On all fours. Slow and fluid — arch up (cat), sag down (cow). Move with your breath. Never force range." },
+        { id:"p1-e2", name:"Hip Flexor Stretch", sets:"2", reps:"45 sec each side",
+          tip:"Kneeling lunge. Tight hip flexors yank on the lumbar spine and worsen disc pressure. This is non-negotiable." },
+        { id:"p1-e3", name:"Piriformis Stretch", sets:"2", reps:"45 sec each side",
+          tip:"Lie on back. Cross ankle over opposite knee (figure-4). Gently pull back thigh toward you. Addresses that hip pain you've noticed." },
+      ]},
+      { id:"p1-daily", name:"Daily Habit", emoji:"🚶", exercises:[
+        { id:"p1-d1", name:"Walk", sets:"1", reps:"20–30 min",
+          tip:"Not slow, not fast — comfortable pace. Walking loads the disc gently and pumps nutrients in. This is genuinely therapeutic, not just filler." },
+      ]}
+    ]
+  },
+  {
+    id:2, name:"Phase 2", subtitle:"Foundational Stability", weeks:"Weeks 4–6",
+    color:"#5B8DB8", emoji:"🏗️",
+    bonusPool: [
+      { id:"p2-s1", name:"Bird-Dog", sets:"3", reps:"8 each side",
+        tip:"Single best exercise for L4-L5. On all fours — opposite arm and leg, hold 3 sec. No hip rotation, no lumbar sagging. Slow and deliberate." },
+      { id:"p2-s2", name:"Dead Bug", sets:"3", reps:"8 each side",
+        tip:"Lower back PRESSED into floor throughout. Lower opposite arm and leg slowly. If your back lifts off — you've gone too far, reduce range." },
+      { id:"p2-s3", name:"Side-Lying Clam", sets:"3", reps:"15 each side",
+        tip:"Band above knees. Feet stay together, rotate top knee up. Activates glute medius — critical for hip and spinal stability." },
+      { id:"p2-s4", name:"Single-Leg Glute Bridge", sets:"3", reps:"10 each side",
+        tip:"Forces each side to work independently. Exposes and corrects left-right imbalances." },
+      { id:"p2-s5", name:"Wall Sit", sets:"3", reps:"30–45 sec",
+        tip:"Back flat on wall, thighs parallel to floor. Pure leg work with zero spinal load. Builds the quad and glute endurance you need for snowboarding." },
+      { id:"p2-s6", name:"Pallof Press (Band)", sets:"3", reps:"10 each side",
+        tip:"Band anchored to door frame or heavy furniture at chest height. Press straight out, hold 2 sec, return. Anti-rotation core work — outstanding for disc protection." },
+      { id:"p2-x1", name:"McGill Curl-Up", sets:"3", reps:"8 each side",
+        tip:"NOT a crunch. One knee bent, hands under lumbar curve to preserve the arch. Lift head and shoulders just off the floor — hold 7–8 sec. Protects discs far better than crunches." },
+      { id:"p2-x2", name:"Side Plank", sets:"3", reps:"20–30 sec each side",
+        tip:"Elbow under shoulder, hips stacked. The lateral obliques are a key anti-lateral-bend stabiliser. Start on knees if needed. Progress to feet when 30 sec feels easy." },
+      { id:"p2-x3", name:"Superman Hold", sets:"3", reps:"8 reps × 5 sec hold",
+        tip:"Lie face down, lift opposite arm and leg simultaneously. Activates the erector spinae and glutes with zero disc compression. Keep the movement small — quality over height." },
+      { id:"p2-x4", name:"Prone Hip Extension", sets:"3", reps:"12 each side",
+        tip:"Lie face down, lift one straight leg 2–3 inches. Contracts glute max without loading the spine. Keep hips level — don't let the pelvis rotate." },
+      { id:"p2-x5", name:"Hollow Body Hold", sets:"3", reps:"20–30 sec",
+        tip:"Lower back pressed into the floor (like dead bug), arms overhead, legs extended low. The full-body anti-extension version of dead bug. Start with knees bent if needed." },
+      { id:"p2-x6", name:"Fire Hydrant", sets:"3", reps:"15 each side",
+        tip:"On all fours, lift knee out to the side like a dog at a hydrant. Targets glute medius and hip external rotators. Keep the spine perfectly still throughout." },
+      { id:"p2-x7", name:"Donkey Kick", sets:"3", reps:"12 each side",
+        tip:"On all fours, kick one heel toward the ceiling, keeping knee bent 90°. Pure glute max activation. Don't arch the lower back — use your glute to lift, not your spine." },
+      { id:"p2-x8", name:"Plank Shoulder Tap", sets:"3", reps:"10 each side",
+        tip:"Full plank position, tap one shoulder with the opposite hand. The magic is keeping your hips completely still — that's the anti-rotation work. Slow and controlled." },
+      { id:"p2-x9", name:"Prone Snow Angel", sets:"3", reps:"10 reps",
+        tip:"Lie face down, arms at sides with thumbs up. Slide arms overhead and back like a snow angel. Activates lower trapezius and thoracic extensors — great postural antidote to desk work." },
+      { id:"p2-x10", name:"Suitcase Hold", sets:"3", reps:"30 sec each side",
+        tip:"Stand holding a dumbbell in one hand at your side. Don't lean — resist the pull. Isometric lateral core work. Heavier is better once you have the pattern." },
+      { id:"p2-x11", name:"Side-Lying Hip Abduction", sets:"3", reps:"15 each side",
+        tip:"Lie on your side, bottom leg bent. Lift the top leg straight up to ~45°. Slow and controlled. Add a band above the knee to progress. Isolates glute medius differently than clamshell." },
+      { id:"p2-x12", name:"Glute Bridge March", sets:"3", reps:"10 each side",
+        tip:"Hold a glute bridge at the top, then slowly lift one foot off the floor. Challenges pelvic stability in a way a regular bridge doesn't. Don't let the hips drop when you march." },
+    ],
+    sessions:[
+      { id:"p2-stability", name:"Stability Session", emoji:"🏗️", exercises:[]}
+    ]
+  },
+  {
+    id:3, name:"Phase 3", subtitle:"Strength Building", weeks:"Weeks 7–12",
+    color:"#8B6BB1", emoji:"💪",
+    sessions:[
+      { id:"p3-a", name:"Session A — Lower Body", emoji:"🏋️", exercises:[
+        { id:"p3-a1", name:"Dumbbell Romanian Deadlift", sets:"4", reps:"8–10",
+          tip:"Hip hinge — push hips BACK, spine stays neutral. Dumbbells hang in front of legs. Feel the hamstrings load. NOT a squat. Start light and nail the pattern." },
+        { id:"p3-a2", name:"Goblet Squat", sets:"3", reps:"10–12",
+          tip:"Hold dumbbell at chest. Squat to parallel — no deeper. Heels can be slightly elevated on plates if mobility is limited." },
+        { id:"p3-a3", name:"Weighted Step-Up", sets:"3", reps:"10 each side",
+          tip:"Hold dumbbells. Step onto a box or stairs. Drive through the heel of the working leg. Directly transfers to snowboarding — one of the best exercises in this phase." },
+        { id:"p3-a4", name:"Nordic Hamstring Curl", sets:"3", reps:"6–8",
+          tip:"Anchor feet under a sofa or have someone hold them. Lower your body as slowly as possible — catch yourself with hands at the bottom. Eccentric hamstring king." },
+        { id:"p3-a5", name:"Single-Leg Glute Bridge", sets:"3", reps:"12 each side",
+          tip:"Progress from Phase 2. Place a dumbbell on the hip for resistance. Keep hips level throughout." },
+      ]},
+      { id:"p3-b", name:"Session B — Upper + Core", emoji:"💪", exercises:[
+        { id:"p3-b1", name:"Pull-Up or Band-Assisted", sets:"4", reps:"6–8",
+          tip:"Pull-up bar or any sturdy overhead bar. Loop a resistance band over the bar for assistance. Decompresses the spine. Control the descent — that's where the strength is built." },
+        { id:"p3-b2", name:"Single-Arm Dumbbell Row", sets:"3", reps:"10–12 each side",
+          tip:"Knee and hand on bench. Spine neutral and parallel to floor. Pull the dumbbell to your hip. Builds thoracic extensors and lats without loading the spine." },
+        { id:"p3-b3", name:"Push-Up", sets:"3", reps:"10–15",
+          tip:"Body rigid as a plank throughout. No sagging hips. Elevate hands on a bench to make it easier. Progress to feet-elevated when ready." },
+        { id:"p3-b4", name:"Dumbbell Farmer Carry", sets:"3", reps:"30 m walk",
+          tip:"Heavy dumbbells, one in each hand. Spine tall, shoulders back. Builds total-body stiffness and grip. One of the best bang-for-buck exercises in existence." },
+        { id:"p3-b5", name:"Pallof Press (Band)", sets:"3", reps:"12 each side",
+          tip:"Increase band resistance from Phase 2. Can now do a slightly more lateral anchor point for a different challenge angle." },
+      ]},
+      { id:"p3-c", name:"Session C — Full Body", emoji:"⚡", exercises:[
+        { id:"p3-c1", name:"Trap Bar Deadlift", sets:"4", reps:"6–8",
+          tip:"More spine-friendly than a barbell deadlift — handles allow an upright torso. Keep chest up, push the floor away. Add weight each week." },
+        { id:"p3-c2", name:"Bulgarian Split Squat", sets:"3", reps:"8 each side",
+          tip:"Rear foot on a bench or chair, dumbbells in hands. Single-leg strength plus hip mobility. One of the most transferable exercises to snowboarding." },
+        { id:"p3-c3", name:"Band Rotational Chop", sets:"3", reps:"12 each side",
+          tip:"Band anchored to door at shoulder height. Rotate through the hips — not just the arms. Replaces cable woodchop exactly. Builds the rotational power you need for turns." },
+        { id:"p3-c4", name:"Suitcase Carry", sets:"3", reps:"30 m walk",
+          tip:"One heavy dumbbell in one hand only. Walk tall, don't lean. Anti-lateral flexion — trains the spine to resist sideways forces." },
+        { id:"p3-c5", name:"Copenhagen Plank", sets:"3", reps:"20 sec each side",
+          tip:"Side plank with the top foot resting on a bench or chair. Hip adductor and lateral core combined. Builds the hip strength needed for edge control on snow." },
+      ]}
+    ]
+  },
+  {
+    id:4, name:"Phase 4", subtitle:"Power & Snowboard Prep", weeks:"Weeks 13–18",
+    color:"#C4793A", emoji:"🏂",
+    sessions:[
+      { id:"p4-snow", name:"Snowboard Conditioning", emoji:"🏂", exercises:[
+        { id:"p4-s1", name:"Box Jump", sets:"4", reps:"5",
+          tip:"Land SOFTLY — bend knees and hips to absorb impact. Step down, don't jump down. Start with a low box. If the back flares, regress to squat-to-stand first." },
+        { id:"p4-s2", name:"Lateral Bound", sets:"4", reps:"8 each side",
+          tip:"Push explosively off one foot sideways, land on the other and absorb. Directly mimics heel-to-toe edge transitions on a snowboard." },
+        { id:"p4-s3", name:"Jump Squat", sets:"3", reps:"8",
+          tip:"Bodyweight only. Explode up, land softly with soft knees. If there's any back pain, go back to wall sits and build more base first." },
+        { id:"p4-s4", name:"Deficit Split Squat", sets:"4", reps:"8 each side",
+          tip:"Front foot elevated on a weight plate or step. Deeper range. Builds hip mobility under load — essential for the deep-flex snowboard stance." },
+        { id:"p4-s5", name:"Med Ball Rotational Throw", sets:"3", reps:"10 each side",
+          tip:"Stand side-on to a wall. Rotate hard from the hips and throw the ball at the wall, catch on rebound. This is where snowboard turning power comes from." },
+        { id:"p4-s6", name:"Single-Leg RDL", sets:"3", reps:"10 each side",
+          tip:"Dumbbell in the opposite hand. Slow and controlled. Balance plus posterior chain load. Essential for variable and uneven terrain." },
+        { id:"p4-s7", name:"Bosu Balance", sets:"3", reps:"60 sec",
+          tip:"Single-leg balance on the dome side. Eyes closed for extra challenge. Proprioceptive training — directly mimics the unstable, shifting snow surface." },
+        { id:"p4-s8", name:"Kettlebell Swing", sets:"4", reps:"12",
+          tip:"Hip hinge at the bottom, explosive hip extension drives the swing — NOT your arms. One of the best exercises for the lower body power you need on a snowboard." },
+      ]}
+    ]
+  },
+  {
+    id:5, name:"Phase 5", subtitle:"Return to Snow", weeks:"Week 19+",
+    color:"#3A8CB5", emoji:"❄️",
+   
