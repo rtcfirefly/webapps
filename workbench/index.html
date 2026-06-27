@@ -3,45 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>workbench — single-file llm app builder</title>
+<title>workbench — chat &amp; build apps</title>
 <style>
   /* ============================================================
-     workbench — a single-file LLM app builder.
-     Design: a monospace "instrument panel" — dark control rail on
-     the left, light drafting canvas on the right. One accent
-     (blueprint cobalt). Everything is hackable; this whole tool is
-     one file with no build step and no external dependencies.
+     workbench — a single-file LLM chat that builds runnable apps.
+     Chat on the left, the live app on the right. Apps can call the
+     model through window.llm; finished apps export to a standalone
+     file. One accent (blueprint cobalt), monospace instrument feel.
+     No build step, no external dependencies.
      ============================================================ */
   :root {
-    --canvas:#EAECEE;        /* cool paper */
-    --ink:#15171C;           /* near-black, faint blue */
-    --muted:#5C636E;
-    --line:#D7DBDF;
-    --surface:#FFFFFF;
-    --rail:#15171C;          /* dark control rail */
-    --rail-ink:#E7E9EC;
-    --rail-muted:#868D98;
-    --rail-line:#282C34;
-    --rail-hover:#1E222A;
-    --accent:#2347E5;        /* blueprint cobalt */
-    --accent-ink:#FFFFFF;
-    --live:#15A06E;
-    --warn:#D6453D;
-    --radius:6px;
+    --canvas:#EAECEE; --ink:#15171C; --muted:#5C636E; --line:#D7DBDF; --surface:#FFFFFF;
+    --rail:#15171C; --rail-ink:#E7E9EC; --rail-muted:#868D98; --rail-line:#282C34; --rail-hover:#1E222A;
+    --accent:#2347E5; --accent-ink:#FFFFFF; --accent-soft:#F1F4FF;
+    --live:#15A06E; --warn:#D6453D; --radius:6px;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing:border-box; }
   html, body { height:100%; }
-  body {
-    margin:0;
-    font-family:var(--mono);
-    color:var(--ink);
-    background:var(--canvas);
-    font-size:13px;
-    line-height:1.5;
-    -webkit-font-smoothing:antialiased;
-  }
+  body { margin:0; font-family:var(--mono); color:var(--ink); background:var(--canvas);
+         font-size:13px; line-height:1.5; -webkit-font-smoothing:antialiased; }
   button { font-family:var(--mono); cursor:pointer; }
   input, textarea { font-family:var(--mono); }
   a { color:var(--accent); }
@@ -49,179 +30,123 @@
   .app { display:grid; grid-template-columns:248px 1fr; height:100vh; }
 
   /* ---- control rail ---- */
-  .rail {
-    background:var(--rail); color:var(--rail-ink);
-    display:flex; flex-direction:column;
-    border-right:1px solid var(--rail-line);
-    min-height:0;
-  }
-  .brand {
-    display:flex; align-items:center; gap:8px;
-    padding:16px 16px 14px; border-bottom:1px solid var(--rail-line);
-  }
+  .rail { background:var(--rail); color:var(--rail-ink); display:flex; flex-direction:column;
+          border-right:1px solid var(--rail-line); min-height:0; }
+  .brand { display:flex; align-items:center; gap:8px; padding:16px 16px 14px; border-bottom:1px solid var(--rail-line); }
   .brand .mark { color:var(--accent); font-size:15px; }
   .brand b { font-weight:600; letter-spacing:.02em; }
   .brand .ver { margin-left:auto; color:var(--rail-muted); font-size:10px; letter-spacing:.08em; }
-
   .rail-actions { padding:12px; }
-  .new-btn {
-    width:100%; padding:9px 10px; text-align:left;
-    background:var(--rail-hover); color:var(--rail-ink);
-    border:1px solid var(--rail-line); border-radius:var(--radius);
-    font-size:12px; display:flex; align-items:center; gap:8px;
-  }
+  .new-btn { width:100%; padding:9px 10px; text-align:left; background:var(--rail-hover); color:var(--rail-ink);
+             border:1px solid var(--rail-line); border-radius:var(--radius); font-size:12px; display:flex; align-items:center; gap:8px; }
   .new-btn:hover { border-color:#3A404B; }
   .new-btn .plus { color:var(--accent); font-weight:700; }
-
-  .builds-label {
-    padding:6px 16px; color:var(--rail-muted);
-    font-size:10px; letter-spacing:.12em; text-transform:uppercase;
-  }
-  .builds { flex:1; overflow-y:auto; padding:0 8px 12px; min-height:0; }
-  .build {
-    display:flex; align-items:center; gap:6px;
-    padding:8px 8px; border-radius:var(--radius);
-    color:var(--rail-ink); position:relative;
-  }
-  .build:hover { background:var(--rail-hover); }
-  .build.active { background:var(--rail-hover); box-shadow:inset 2px 0 0 var(--accent); }
-  .build .dot { width:5px; height:5px; border-radius:50%; background:var(--rail-muted); flex:none; }
-  .build.active .dot { background:var(--accent); }
-  .build .name {
-    flex:1; min-width:0; font-size:12px; white-space:nowrap;
-    overflow:hidden; text-overflow:ellipsis;
-  }
-  .build .kill {
-    opacity:0; border:none; background:none; color:var(--rail-muted);
-    font-size:14px; line-height:1; padding:2px 4px; border-radius:4px;
-  }
-  .build:hover .kill { opacity:1; }
-  .build .kill:hover { color:var(--warn); background:rgba(214,69,61,.12); }
-
+  .list-label { padding:6px 16px; color:var(--rail-muted); font-size:10px; letter-spacing:.12em; text-transform:uppercase; }
+  .list { flex:1; overflow-y:auto; padding:0 8px 12px; min-height:0; }
+  .row { display:flex; align-items:center; gap:6px; padding:8px; border-radius:var(--radius); color:var(--rail-ink); }
+  .row:hover { background:var(--rail-hover); }
+  .row.active { background:var(--rail-hover); box-shadow:inset 2px 0 0 var(--accent); }
+  .row .dot { width:5px; height:5px; border-radius:50%; background:var(--rail-muted); flex:none; }
+  .row.active .dot { background:var(--accent); }
+  .row .name { flex:1; min-width:0; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row .kill { opacity:0; border:none; background:none; color:var(--rail-muted); font-size:14px; line-height:1; padding:2px 4px; border-radius:4px; }
+  .row:hover .kill { opacity:1; }
+  .row .kill:hover { color:var(--warn); background:rgba(214,69,61,.12); }
   .rail-foot { border-top:1px solid var(--rail-line); padding:10px 12px; display:flex; gap:8px; }
-  .rail-foot button {
-    flex:1; background:none; color:var(--rail-muted);
-    border:1px solid var(--rail-line); border-radius:var(--radius);
-    padding:7px 6px; font-size:11px;
-  }
+  .rail-foot button { flex:1; background:none; color:var(--rail-muted); border:1px solid var(--rail-line);
+                      border-radius:var(--radius); padding:7px 6px; font-size:11px; }
   .rail-foot button:hover { color:var(--rail-ink); border-color:#3A404B; }
 
-  /* ---- canvas ---- */
+  /* ---- main ---- */
   .canvas { display:flex; flex-direction:column; min-width:0; min-height:0; }
-  .topbar {
-    display:flex; align-items:center; gap:10px;
-    padding:10px 16px; border-bottom:1px solid var(--line);
-    background:var(--surface);
-  }
-  .build-title {
-    font-size:13px; font-weight:600; border:1px solid transparent;
-    background:none; padding:3px 6px; border-radius:4px; color:var(--ink);
-    max-width:340px; min-width:60px;
-  }
-  .build-title:hover { border-color:var(--line); }
-  .build-title:focus { outline:none; border-color:var(--accent); background:#fff; }
-  .model-badge {
-    margin-left:auto; display:flex; align-items:center; gap:7px;
-    color:var(--muted); font-size:11px; letter-spacing:.02em;
-    border:1px solid var(--line); border-radius:99px; padding:4px 10px;
-  }
+  .topbar { display:flex; align-items:center; gap:10px; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--surface); }
+  .bench-title { font-size:13px; font-weight:600; border:1px solid transparent; background:none; padding:3px 6px;
+                 border-radius:4px; color:var(--ink); max-width:300px; min-width:60px; }
+  .bench-title:hover { border-color:var(--line); }
+  .bench-title:focus { outline:none; border-color:var(--accent); background:#fff; }
+  .top-actions { margin-left:auto; display:flex; align-items:center; gap:8px; }
+  .icon-btn { border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:var(--radius);
+              padding:6px 10px; font-size:12px; display:inline-flex; align-items:center; gap:6px; }
+  .icon-btn:hover { border-color:var(--accent); color:var(--accent); }
+  .icon-btn.on { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
+  .model-badge { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:11px; border:1px solid var(--line);
+                 border-radius:99px; padding:4px 10px; }
   .model-badge .src { color:var(--ink); }
   .model-badge .live-dot { width:6px; height:6px; border-radius:50%; background:var(--live); flex:none; }
   .model-badge .live-dot.off { background:var(--warn); }
-  .gear {
-    border:1px solid var(--line); background:var(--surface); color:var(--ink);
-    border-radius:var(--radius); padding:6px 10px; font-size:12px;
-  }
-  .gear:hover { border-color:var(--accent); color:var(--accent); }
 
-  .stage { flex:1; min-height:0; display:flex; flex-direction:column; padding:16px; gap:12px; }
+  .main { flex:1; min-height:0; display:grid; grid-template-columns:1fr; }
+  .main.has-app { grid-template-columns:minmax(330px,1fr) minmax(0,1.05fr); }
 
-  /* preview screen */
-  .screen {
-    flex:1; min-height:0; display:flex; flex-direction:column;
-    background:var(--surface); border:1px solid var(--line);
-    border-radius:var(--radius); overflow:hidden;
-    box-shadow:0 1px 0 rgba(20,23,28,.03), 0 8px 24px -18px rgba(20,23,28,.4);
-  }
-  .screen-bar {
-    display:flex; align-items:center; gap:8px; padding:8px 10px;
-    border-bottom:1px solid var(--line); background:#FCFCFD;
-  }
-  .screen-bar .tag {
-    font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
-  }
-  .screen-bar .spacer { flex:1; }
-  .mini {
-    border:1px solid var(--line); background:#fff; color:var(--ink);
-    border-radius:5px; padding:4px 9px; font-size:11px;
-  }
-  .mini:hover { border-color:var(--accent); color:var(--accent); }
-  .mini.toggled { border-color:var(--accent); color:var(--accent); background:#F4F6FF; }
-  .screen-body { flex:1; min-height:0; position:relative; }
-  iframe#preview { width:100%; height:100%; border:none; background:#fff; display:block; }
-  pre#source {
-    margin:0; height:100%; overflow:auto; padding:14px;
-    font-size:12px; line-height:1.55; color:#2A2E36; background:#FAFBFC;
-    white-space:pre-wrap; word-break:break-word; display:none;
-  }
-  .stage.show-source pre#source { display:block; }
-  .stage.show-source iframe#preview { display:none; }
+  /* chat column */
+  .chat-col { display:flex; flex-direction:column; min-width:0; min-height:0; border-right:1px solid var(--line); }
+  .main:not(.has-app) .chat-col { border-right:none; }
+  .transcript { flex:1; overflow-y:auto; padding:20px 18px; display:flex; flex-direction:column; gap:16px; min-height:0; }
+  .hello { margin:auto; text-align:center; color:var(--muted); max-width:380px; display:flex; flex-direction:column; gap:10px; }
+  .hello .mark { font-size:28px; color:var(--accent); }
+  .hello h1 { font-size:17px; color:var(--ink); margin:0; font-weight:600; }
+  .hello p { margin:0; font-size:12px; }
 
-  /* empty state */
-  .empty {
-    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
-    text-align:center; gap:14px; padding:24px;
-  }
-  .empty .mark { font-size:30px; color:var(--accent); }
-  .empty h1 { font-size:18px; font-weight:600; margin:0; letter-spacing:.01em; }
-  .empty p { margin:0; color:var(--muted); font-size:12px; max-width:380px; }
+  .turn { display:flex; flex-direction:column; gap:5px; }
+  .turn .who { font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
+  .turn.user .who { color:var(--accent); }
+  .bubble { font-size:13px; line-height:1.6; }
+  .bubble p { margin:0 0 8px; } .bubble p:last-child { margin:0; }
+  .bubble code { background:#EEF0F3; border:1px solid var(--line); border-radius:4px; padding:0 4px; font-size:12px; }
+  .turn.user .bubble { background:var(--accent-soft); border:1px solid #DCE2FF; border-radius:var(--radius); padding:9px 11px; }
+  .caret-blink::after { content:'▍'; color:var(--accent); animation:blink 1.05s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .appchip { display:inline-flex; align-items:center; gap:8px; margin-top:6px; padding:7px 11px; border:1px solid var(--line);
+             background:var(--surface); border-radius:var(--radius); color:var(--ink); font-size:12px; }
+  .appchip:hover { border-color:var(--accent); }
+  .appchip .ic { color:var(--accent); }
+  .appchip .st { color:var(--muted); font-size:11px; }
 
-  /* prompt bar */
-  .composer {
-    display:flex; gap:8px; align-items:flex-end;
-    background:var(--surface); border:1px solid var(--line);
-    border-radius:var(--radius); padding:8px;
-  }
+  .composer-wrap { padding:12px 16px 16px; border-top:1px solid var(--line); background:var(--surface); }
+  .status { min-height:15px; font-size:11px; color:var(--muted); margin-bottom:7px; display:flex; align-items:center; gap:7px; }
+  .status.err { color:var(--warn); }
+  .status .pulse { width:6px; height:6px; border-radius:50%; background:var(--accent); animation:pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:.3;} 50%{opacity:1;} }
+  .composer { display:flex; gap:8px; align-items:flex-end; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:7px; }
   .composer:focus-within { border-color:var(--accent); }
-  .composer .caret { color:var(--accent); padding:6px 0 0 6px; font-weight:700; }
-  .composer textarea {
-    flex:1; resize:none; border:none; outline:none; background:none;
-    color:var(--ink); font-size:13px; line-height:1.5; padding:6px 4px;
-    max-height:160px; min-height:24px;
-  }
+  .mic { border:1px solid var(--line); background:#fff; color:var(--muted); border-radius:5px; padding:8px 10px; font-size:14px; align-self:stretch; }
+  .mic:hover { color:var(--ink); border-color:var(--accent); }
+  .mic.on { color:#fff; background:var(--warn); border-color:var(--warn); animation:pulse 1s ease-in-out infinite; }
+  .composer textarea { flex:1; resize:none; border:none; outline:none; background:none; color:var(--ink); font-size:13px;
+                       line-height:1.5; padding:6px 4px; max-height:170px; min-height:22px; }
   .composer textarea::placeholder { color:#9AA1AB; }
-  .build-go {
-    border:none; background:var(--accent); color:var(--accent-ink);
-    border-radius:5px; padding:9px 16px; font-size:12px; font-weight:600;
-    display:flex; align-items:center; gap:7px; align-self:stretch;
-  }
-  .build-go:hover { background:#1B3BC9; }
-  .build-go:disabled { background:#9AA8E8; cursor:default; }
-  .build-go .spin {
-    width:11px; height:11px; border:2px solid rgba(255,255,255,.45);
-    border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite;
-  }
+  .send { border:none; background:var(--accent); color:var(--accent-ink); border-radius:5px; padding:9px 15px;
+          font-size:12px; font-weight:600; align-self:stretch; display:flex; align-items:center; gap:7px; }
+  .send:hover { background:#1B3BC9; } .send:disabled { background:#9AA8E8; cursor:default; }
+  .send .spin { width:11px; height:11px; border:2px solid rgba(255,255,255,.45); border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
 
-  .empty .composer { width:min(560px, 92%); }
-  .hint { color:var(--muted); font-size:11px; }
-  .status {
-    min-height:16px; font-size:11px; color:var(--muted); padding:0 4px;
-    display:flex; align-items:center; gap:7px;
-  }
-  .status .pulse { width:6px; height:6px; border-radius:50%; background:var(--accent); animation:pulse 1.1s ease-in-out infinite; }
-  .status.err { color:var(--warn); }
-  @keyframes pulse { 0%,100%{opacity:.3;} 50%{opacity:1;} }
+  /* preview column */
+  .preview-col { display:none; flex-direction:column; min-width:0; min-height:0; padding:14px; }
+  .main.has-app .preview-col { display:flex; }
+  .screen { flex:1; min-height:0; display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line);
+            border-radius:var(--radius); overflow:hidden; box-shadow:0 8px 24px -18px rgba(20,23,28,.4); }
+  .screen-bar { display:flex; align-items:center; gap:6px; padding:8px 10px; border-bottom:1px solid var(--line); background:#FCFCFD; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:5px; overflow:hidden; }
+  .seg button { border:none; background:#fff; color:var(--muted); padding:4px 11px; font-size:11px; }
+  .seg button.active { background:var(--accent-soft); color:var(--accent); }
+  .screen-bar .spacer { flex:1; }
+  .mini { border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:5px; padding:4px 9px; font-size:11px; }
+  .mini:hover { border-color:var(--accent); color:var(--accent); }
+  .screen-cap { font-size:10.5px; color:var(--muted); padding:5px 11px; border-bottom:1px solid var(--line); background:#FCFCFD; }
+  .screen-body { flex:1; min-height:0; position:relative; }
+  iframe#preview { width:100%; height:100%; border:none; background:#fff; display:block; }
+  pre#source { margin:0; height:100%; overflow:auto; padding:14px; font-size:12px; line-height:1.55; color:#2A2E36;
+               background:#FAFBFC; white-space:pre-wrap; word-break:break-word; display:none; }
+  pre#source.streaming::after { content:'▍'; color:var(--accent); font-weight:700; animation:blink 1.05s steps(1) infinite; }
+  .screen.show-source pre#source { display:block; }
+  .screen.show-source iframe#preview { display:none; }
 
   /* settings drawer */
   .scrim { position:fixed; inset:0; background:rgba(15,17,22,.42); opacity:0; pointer-events:none; transition:opacity .15s; z-index:40; }
   .scrim.open { opacity:1; pointer-events:auto; }
-  .drawer {
-    position:fixed; top:0; right:0; height:100%; width:380px; max-width:92vw;
-    background:var(--surface); border-left:1px solid var(--line);
-    transform:translateX(100%); transition:transform .18s ease; z-index:50;
-    display:flex; flex-direction:column;
-  }
+  .drawer { position:fixed; top:0; right:0; height:100%; width:380px; max-width:92vw; background:var(--surface);
+            border-left:1px solid var(--line); transform:translateX(100%); transition:transform .18s ease; z-index:50; display:flex; flex-direction:column; }
   .drawer.open { transform:none; }
   .drawer-head { display:flex; align-items:center; padding:16px; border-bottom:1px solid var(--line); }
   .drawer-head b { font-size:13px; letter-spacing:.04em; }
@@ -230,543 +155,515 @@
   .drawer-body { padding:16px; overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:16px; }
   .field { display:flex; flex-direction:column; gap:5px; }
   .field label { font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
-  .field input, .field select {
-    border:1px solid var(--line); border-radius:5px; padding:8px 10px;
-    font-size:12px; background:#fff; color:var(--ink); outline:none;
-  }
+  .field input, .field select { border:1px solid var(--line); border-radius:5px; padding:8px 10px; font-size:12px; background:#fff; color:var(--ink); outline:none; }
   .field input:focus, .field select:focus { border-color:var(--accent); }
   .field .help { font-size:10.5px; color:var(--muted); line-height:1.45; }
   .field .help a { word-break:break-all; }
   .presets { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
-  .preset {
-    border:1px solid var(--line); background:#fff; border-radius:5px;
-    padding:8px; font-size:11px; text-align:left; color:var(--ink);
-  }
+  .preset { border:1px solid var(--line); background:#fff; border-radius:5px; padding:8px; font-size:11px; text-align:left; color:var(--ink); }
   .preset small { display:block; color:var(--muted); font-size:9.5px; margin-top:2px; }
   .preset:hover { border-color:var(--accent); }
-  .preset.active { border-color:var(--accent); background:#F4F6FF; }
+  .preset.active { border-color:var(--accent); background:var(--accent-soft); }
   .drawer-foot { padding:14px 16px; border-top:1px solid var(--line); }
-  .save-btn {
-    width:100%; background:var(--ink); color:#fff; border:none;
-    border-radius:5px; padding:10px; font-size:12px; font-weight:600;
-  }
+  .save-btn { width:100%; background:var(--ink); color:#fff; border:none; border-radius:5px; padding:10px; font-size:12px; font-weight:600; }
   .save-btn:hover { background:#000; }
   .note { font-size:10.5px; color:var(--muted); line-height:1.5; border-top:1px solid var(--line); padding-top:12px; }
 
   .rail-toggle { display:none; }
-
-  @media (max-width:760px) {
+  @media (max-width:860px) {
     .app { grid-template-columns:1fr; }
-    .rail {
-      position:fixed; left:0; top:0; bottom:0; width:248px; z-index:30;
-      transform:translateX(-100%); transition:transform .18s;
-    }
+    .rail { position:fixed; left:0; top:0; bottom:0; width:248px; z-index:30; transform:translateX(-100%); transition:transform .18s; }
     .rail.open { transform:none; }
-    .rail-toggle {
-      display:inline-flex; border:1px solid var(--line); background:var(--surface);
-      color:var(--ink); border-radius:var(--radius); padding:6px 10px; font-size:14px;
-    }
+    .rail-toggle { display:inline-flex; }
+    .main.has-app { grid-template-columns:1fr; grid-template-rows:minmax(0,1fr) minmax(0,.9fr); }
+    .chat-col { border-right:none; border-bottom:1px solid var(--line); }
   }
-  @media (prefers-reduced-motion: reduce) {
-    * { animation-duration:.001ms !important; transition-duration:.001ms !important; }
-  }
+  @media (prefers-reduced-motion: reduce) { * { animation-duration:.001ms !important; transition-duration:.001ms !important; } }
 </style>
 </head>
 <body>
 <div class="app">
-
-  <!-- control rail -->
   <aside class="rail" id="rail">
-    <div class="brand">
-      <span class="mark">◆</span><b>workbench</b><span class="ver">zero-proxy</span>
-    </div>
-    <div class="rail-actions">
-      <button class="new-btn" id="newBtn"><span class="plus">+</span> New build</button>
-    </div>
-    <div class="builds-label">builds</div>
-    <div class="builds" id="builds"></div>
+    <div class="brand"><span class="mark">◆</span><b>workbench</b><span class="ver">zero-proxy</span></div>
+    <div class="rail-actions"><button class="new-btn" id="newBtn"><span class="plus">+</span> New workbench</button></div>
+    <div class="list-label">workbenches</div>
+    <div class="list" id="list"></div>
     <div class="rail-foot">
-      <button id="exportBtn">Export</button>
-      <button id="importBtn">Import</button>
+      <button id="exportBtn">Back up</button>
+      <button id="importBtn">Restore</button>
     </div>
   </aside>
 
-  <!-- canvas -->
   <main class="canvas">
     <div class="topbar">
-      <button class="rail-toggle" id="railToggle">≡</button>
-      <input class="build-title" id="buildTitle" value="" placeholder="untitled" spellcheck="false" disabled>
-      <div class="model-badge" id="modelBadge">
-        <span class="live-dot" id="liveDot"></span>
-        <span class="src" id="badgeSrc">no provider</span>
-        <span id="badgeModel"></span>
+      <button class="icon-btn rail-toggle" id="railToggle">≡</button>
+      <input class="bench-title" id="benchTitle" value="" placeholder="untitled" spellcheck="false" disabled>
+      <div class="top-actions">
+        <button class="icon-btn" id="speakBtn" title="Read replies aloud">🔊 voice off</button>
+        <div class="model-badge"><span class="live-dot" id="liveDot"></span><span class="src" id="badgeSrc">no provider</span><span id="badgeModel"></span></div>
+        <button class="icon-btn" id="gearBtn">⚙</button>
       </div>
-      <button class="gear" id="gearBtn">⚙ settings</button>
     </div>
 
-    <div class="stage" id="stage">
-      <!-- empty state -->
-      <div class="empty" id="empty">
-        <div class="mark">◆</div>
-        <h1>Describe something to build.</h1>
-        <p>The model returns a complete app. It runs right here in a sandbox, and every build is saved to this browser.</p>
-        <div class="composer" id="emptyComposer">
-          <span class="caret">›</span>
-          <textarea id="emptyPrompt" rows="1" placeholder="a pomodoro timer with a circular progress ring…" spellcheck="false"></textarea>
-          <button class="build-go" id="emptyGo">Build →</button>
+    <div class="main" id="mainGrid">
+      <!-- chat -->
+      <section class="chat-col">
+        <div class="transcript" id="transcript"></div>
+        <div class="composer-wrap">
+          <div class="status" id="status"></div>
+          <div class="composer">
+            <button class="mic" id="micBtn" title="Dictate (Chrome/Edge)">🎤</button>
+            <textarea id="prompt" rows="1" placeholder="describe what to build, or just talk…" spellcheck="false"></textarea>
+            <button class="send" id="sendBtn">Send →</button>
+          </div>
         </div>
-        <div class="hint" id="emptyHint">Runs sandboxed · no key leaves your browser</div>
-      </div>
+      </section>
 
-      <!-- working state -->
-      <div class="screen" id="screen" style="display:none;">
-        <div class="screen-bar">
-          <span class="tag">preview</span>
-          <span class="spacer"></span>
-          <button class="mini" id="srcToggle">source</button>
-          <button class="mini" id="copyBtn">copy</button>
-          <button class="mini" id="dlBtn">download</button>
-          <button class="mini" id="openBtn">open ↗</button>
+      <!-- live app -->
+      <section class="preview-col">
+        <div class="screen" id="screen">
+          <div class="screen-bar">
+            <div class="seg"><button id="tabPreview" class="active">preview</button><button id="tabSource">source</button></div>
+            <span class="spacer"></span>
+            <button class="mini" id="copyBtn">copy</button>
+            <button class="mini" id="dlBtn">download</button>
+            <button class="mini" id="openBtn">open ↗</button>
+          </div>
+          <div class="screen-cap" id="screenCap"></div>
+          <div class="screen-body">
+            <iframe id="preview" sandbox="allow-scripts allow-modals allow-forms allow-popups" title="app preview"></iframe>
+            <pre id="source"></pre>
+          </div>
         </div>
-        <div class="screen-body">
-          <iframe id="preview" sandbox="allow-scripts allow-modals allow-forms" title="app preview"></iframe>
-          <pre id="source"></pre>
-        </div>
-      </div>
-
-      <div class="status" id="status"></div>
-
-      <!-- docked composer (shown once a build exists) -->
-      <div class="composer" id="dockComposer" style="display:none;">
-        <span class="caret">›</span>
-        <textarea id="dockPrompt" rows="1" placeholder="describe a change…" spellcheck="false"></textarea>
-        <button class="build-go" id="dockGo">Build →</button>
-      </div>
+      </section>
     </div>
   </main>
 </div>
 
-<!-- settings -->
 <div class="scrim" id="scrim"></div>
 <div class="drawer" id="drawer">
   <div class="drawer-head"><b>SETTINGS</b><button class="x" id="closeDrawer">×</button></div>
   <div class="drawer-body">
-    <div class="field">
-      <label>Provider preset</label>
-      <div class="presets" id="presets"></div>
-    </div>
-    <div class="field">
-      <label>Endpoint URL</label>
-      <input id="fBase" spellcheck="false" autocomplete="off">
-    </div>
-    <div class="field">
-      <label>Model</label>
-      <input id="fModel" spellcheck="false" autocomplete="off">
-      <span class="help" id="modelHelp"></span>
-    </div>
-    <div class="field" id="keyField">
-      <label>API key</label>
-      <input id="fKey" type="password" spellcheck="false" autocomplete="off" placeholder="sk-…">
-      <span class="help">Stored only in this browser's local storage. Generated apps run in a sandbox and can't read it.</span>
-    </div>
+    <div class="field"><label>Provider preset</label><div class="presets" id="presets"></div></div>
+    <div class="field"><label>Endpoint URL</label><input id="fBase" spellcheck="false" autocomplete="off"></div>
+    <div class="field"><label>Model</label><input id="fModel" spellcheck="false" autocomplete="off"><span class="help" id="modelHelp"></span></div>
+    <div class="field" id="keyField"><label>API key</label><input id="fKey" type="password" spellcheck="false" autocomplete="off" placeholder="sk-…">
+      <span class="help">Stored only in this browser. The live preview reaches the model through workbench, so your key never enters the apps you build.</span></div>
     <div class="note" id="corsNote"></div>
   </div>
   <div class="drawer-foot"><button class="save-btn" id="saveSettings">Save settings</button></div>
 </div>
-
 <input type="file" id="importFile" accept="application/json" style="display:none;">
 
 <script>
 /* ============================================================
-   1. Storage — localStorage with an in-memory fallback so the
-   tool never hard-crashes in a restricted sandbox/preview.
+   1. Storage (localStorage + in-memory fallback)
    ============================================================ */
 const mem = {};
 const store = {
-  get(k){ try { const v = localStorage.getItem(k); return v==null ? (k in mem ? mem[k] : null) : v; }
-          catch { return k in mem ? mem[k] : null; } },
+  get(k){ try { const v=localStorage.getItem(k); return v==null?(k in mem?mem[k]:null):v; } catch { return k in mem?mem[k]:null; } },
   set(k,v){ mem[k]=v; try { localStorage.setItem(k,v); } catch {} },
 };
-const K_SETTINGS = 'workbench:settings';
-const K_APPS     = 'workbench:apps';
-const K_CURRENT  = 'workbench:current';
+const K_SETTINGS='workbench:settings', K_CHATS='workbench:chats', K_CURRENT='workbench:current';
 
 /* ============================================================
-   2. Provider presets. "format" picks the request/response shape.
-   Zero-proxy set: providers that allow direct browser calls
-   (Anthropic via its opt-in header, OpenRouter) plus local
-   servers (Ollama, llama.cpp) that you enable CORS on yourself.
+   2. Providers (zero-proxy set) + system prompt
    ============================================================ */
 const PRESETS = {
-  anthropic: {
-    label:'Anthropic', format:'anthropic', needsKey:true,
-    base:'https://api.anthropic.com/v1/messages',
-    model:'claude-sonnet-4-6',
-    modelsUrl:'https://docs.claude.com/en/docs/about-claude/models',
-    cors:'Works directly from the browser — the request sends the anthropic-dangerous-direct-browser-access header for you.',
-  },
-  openrouter: {
-    label:'OpenRouter', format:'openai', needsKey:true,
-    base:'https://openrouter.ai/api/v1/chat/completions',
-    model:'anthropic/claude-sonnet-4.6',
-    modelsUrl:'https://openrouter.ai/models',
-    cors:'Works directly from the browser. Set the model id to any slug from the OpenRouter model list.',
-  },
-  ollama: {
-    label:'Ollama', format:'openai', needsKey:false,
-    base:'http://localhost:11434/v1/chat/completions',
-    model:'llama3.1',
-    modelsUrl:'',
-    cors:'Local. If hosted off localhost (e.g. GitHub Pages), set OLLAMA_ORIGINS to this page\'s origin and restart Ollama. Serving this file from localhost avoids that.',
-  },
-  llamacpp: {
-    label:'llama.cpp', format:'openai', needsKey:false,
-    base:'http://localhost:8080/v1/chat/completions',
-    model:'local-model',
-    modelsUrl:'',
-    cors:'Local. The llama.cpp server sends CORS headers, so localhost-served pages work out of the box.',
-  },
+  anthropic:{ label:'Anthropic', format:'anthropic', needsKey:true, base:'https://api.anthropic.com/v1/messages',
+    model:'claude-sonnet-4-6', modelsUrl:'https://docs.claude.com/en/docs/about-claude/models',
+    cors:'Works directly from the browser — the request sends the anthropic-dangerous-direct-browser-access header for you.' },
+  openrouter:{ label:'OpenRouter', format:'openai', needsKey:true, base:'https://openrouter.ai/api/v1/chat/completions',
+    model:'anthropic/claude-sonnet-4.6', modelsUrl:'https://openrouter.ai/models',
+    cors:'Works directly from the browser. Set the model id to any slug from the OpenRouter model list.' },
+  ollama:{ label:'Ollama', format:'openai', needsKey:false, base:'http://localhost:11434/v1/chat/completions',
+    model:'llama3.1', modelsUrl:'',
+    cors:'Local. If this page is hosted off localhost, set OLLAMA_ORIGINS to its origin and restart Ollama. Serving the file from localhost avoids that.' },
+  llamacpp:{ label:'llama.cpp', format:'openai', needsKey:false, base:'http://localhost:8080/v1/chat/completions',
+    model:'local-model', modelsUrl:'',
+    cors:'Local. The llama.cpp server sends CORS headers, so localhost-served pages work out of the box.' },
 };
 
-const SYSTEM_PROMPT = `You are a code generator embedded in a single-file app builder. The user describes a web app or UI, or asks for changes to the one you previously produced.
+const SYSTEM_PROMPT = `You are a helpful assistant inside "workbench", a local chat that builds runnable apps. Talk with the user normally and conversationally — explain, suggest, ask questions when useful.
 
-Always respond with ONE complete, self-contained HTML document and NOTHING else:
-- Start at <!DOCTYPE html> and end at </html>.
-- Inline all CSS in <style> and all JavaScript in <script>. Keep everything in the single file.
-- Prefer vanilla JS. You may load well-known libraries from https://cdnjs.cloudflare.com only if genuinely needed.
-- The app runs inside a sandboxed iframe with no access to its parent and NO storage APIs. Do NOT use localStorage, sessionStorage, cookies, or indexedDB — keep all state in memory (JS variables).
-- Make it look considered: sensible spacing, type, and color. Aim for something that works on first load.
-- Do not include markdown code fences, explanations, or any text outside the HTML. Output raw HTML only.
+When the user wants an app, tool, game, or UI, build it: include ONE complete, self-contained HTML document inside a single \`\`\`html fenced code block. It runs live in a sandboxed preview beside the chat. Outside that block, keep your message short and friendly — describe what you built or changed in a sentence or two. Never paste the code twice or explain it line by line.
 
-When asked for a change, return the full updated document, not a diff.`;
+Apps you build can talk to the language model through a global that is already injected — do NOT define it yourself, do NOT put any API key in the app:
+  await window.llm.chat("a prompt")                       // -> string
+  await window.llm.chat([{role:"user",content:"hi"}])     // messages array
+  await window.llm.chat(msgs, { onToken:(delta,full)=>{} })// stream tokens
+Use it freely for AI-powered apps.
+
+App rules: single HTML file; inline all CSS and JS; vanilla JS preferred (cdnjs allowed only if needed); NO localStorage/sessionStorage/cookies/indexedDB — keep state in memory. When revising, return the FULL updated document in a new \`\`\`html block.`;
+
+/* dev bridge: injected into the live preview; routes window.llm through the parent (keeps the key here) */
+const DEV_BRIDGE = `(function(){var pend={},seq=0;function norm(m){return typeof m==='string'?[{role:'user',content:m}]:m;}
+window.llm={chat:function(messages,opts){opts=opts||{};return new Promise(function(res,rej){var id='r'+(++seq);pend[id]={res:res,rej:rej,onToken:opts.onToken};parent.postMessage({__llm:true,id:id,messages:norm(messages),stream:!!opts.onToken},'*');});}};
+window.addEventListener('message',function(e){var d=e.data;if(!d||!d.__llmResult)return;var p=pend[d.id];if(!p)return;if(d.type==='token'){if(p.onToken)p.onToken(d.text,d.full);}else if(d.type==='done'){p.res(d.text);delete pend[d.id];}else if(d.type==='error'){p.rej(new Error(d.error));delete pend[d.id];}});})();`;
+
+/* portable bridge: baked into EXPORTED apps that use window.llm. Prompts the end user for their own key. */
+function portableBridgeFn(CFG){
+  function getKey(){ if(!CFG.needsKey) return '';
+    var k=null; try{k=localStorage.getItem(CFG.store);}catch(e){}
+    if(!k){ k=prompt('Enter your '+CFG.label+' API key for this app:')||''; if(k){ try{localStorage.setItem(CFG.store,k);}catch(e){} } }
+    return k; }
+  window.llm={ chat:function(messages){
+    var msgs=typeof messages==='string'?[{role:'user',content:messages}]:messages, key=getKey(), isA=CFG.format==='anthropic', headers, body;
+    if(isA){ headers={'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'};
+      var sys='',conv=[]; msgs.forEach(function(m){ if(m.role==='system')sys+=(sys?'\n':'')+m.content; else conv.push(m); });
+      body={model:CFG.model,max_tokens:4096,messages:conv}; if(sys)body.system=sys;
+    } else { headers={'content-type':'application/json'}; if(key)headers['authorization']='Bearer '+key; body={model:CFG.model,max_tokens:4096,messages:msgs}; }
+    return fetch(CFG.base,{method:'POST',headers:headers,body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(d){
+      if(isA)return (d.content||[]).filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('');
+      return d.choices&&d.choices[0]&&d.choices[0].message?d.choices[0].message.content:''; }); }};
+}
 
 /* ============================================================
    3. State
    ============================================================ */
-let settings = loadSettings();
-let apps = loadApps();
-let currentId = store.get(K_CURRENT);
-let busy = false;
-
-function loadSettings(){
-  try { const s = JSON.parse(store.get(K_SETTINGS)); if (s && s.base) return s; } catch {}
-  const p = PRESETS.anthropic;
-  return { preset:'anthropic', format:p.format, base:p.base, model:p.model, needsKey:p.needsKey, key:'' };
-}
-function loadApps(){ try { const a = JSON.parse(store.get(K_APPS)); return Array.isArray(a) ? a : []; } catch { return []; } }
-function persist(){ store.set(K_APPS, JSON.stringify(apps)); store.set(K_CURRENT, currentId||''); }
-function persistSettings(){ store.set(K_SETTINGS, JSON.stringify(settings)); }
+let settings=loadSettings(), chats=loadChats(), currentId=store.get(K_CURRENT), busy=false, speakOn=!!settings.speak;
+function loadSettings(){ try{ const s=JSON.parse(store.get(K_SETTINGS)); if(s&&s.base) return s; }catch{} const p=PRESETS.anthropic;
+  return { preset:'anthropic', format:p.format, base:p.base, model:p.model, needsKey:p.needsKey, key:'', speak:false }; }
+function loadChats(){ try{ const a=JSON.parse(store.get(K_CHATS)); return Array.isArray(a)?a:[]; }catch{ return []; } }
+function persist(){ store.set(K_CHATS, JSON.stringify(chats)); store.set(K_CURRENT, currentId||''); }
+function persistSettings(){ settings.speak=speakOn; store.set(K_SETTINGS, JSON.stringify(settings)); }
 
 /* ============================================================
-   4. Provider adapter — builds the request and reads the reply
-   for both the Anthropic and OpenAI-compatible shapes.
+   4. Model call (streaming, both formats). system=null for app calls.
    ============================================================ */
-async function callModel(messages){
-  const url = settings.base.trim();
-  const model = settings.model.trim();
-  const key = (settings.key||'').trim();
+async function streamModel(messages, onText, system){
+  const url=settings.base.trim(), model=settings.model.trim(), key=(settings.key||'').trim(), isA=settings.format==='anthropic';
   let headers, body;
-
-  if (settings.format === 'anthropic') {
-    headers = {
-      'content-type':'application/json',
-      'x-api-key':key,
-      'anthropic-version':'2023-06-01',
-      'anthropic-dangerous-direct-browser-access':'true',
-    };
-    body = { model, max_tokens:8192, system:SYSTEM_PROMPT, messages };
+  if(isA){
+    headers={'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'};
+    let sys=system||'', conv=[];
+    for(const m of messages){ if(m.role==='system') sys+=(sys?'\n':'')+(typeof m.content==='string'?m.content:''); else conv.push(m); }
+    body={ model, max_tokens:8192, messages:conv, stream:true }; if(sys) body.system=sys;
   } else {
-    headers = { 'content-type':'application/json' };
-    if (key) headers['authorization'] = 'Bearer ' + key;
-    body = { model, max_tokens:8192, messages:[{role:'system',content:SYSTEM_PROMPT}, ...messages] };
+    headers={'content-type':'application/json'}; if(key) headers['authorization']='Bearer '+key;
+    const msgs = system ? [{role:'system',content:system}, ...messages] : messages;
+    body={ model, max_tokens:8192, messages:msgs, stream:true };
   }
-
   let res;
-  try {
-    res = await fetch(url, { method:'POST', headers, body:JSON.stringify(body) });
-  } catch (e) {
-    throw new Error('Network/CORS error — the request never completed. Check the endpoint URL, and for local models confirm CORS is enabled (see settings).');
-  }
-  if (!res.ok) {
-    let detail = '';
-    try { const j = await res.json(); detail = j.error?.message || j.message || JSON.stringify(j); }
-    catch { detail = await res.text().catch(()=> ''); }
-    throw new Error(`${res.status} ${res.statusText}${detail ? ' — ' + detail : ''}`);
-  }
-  const data = await res.json();
-  if (settings.format === 'anthropic') {
-    return (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
-  }
-  return data.choices?.[0]?.message?.content || '';
-}
-
-/* Pull a clean HTML document out of the model's reply. */
-function extractHtml(text){
-  let t = (text||'').trim();
-  const fence = t.match(/```(?:html)?\s*([\s\S]*?)```/i);
-  if (fence) t = fence[1].trim();
-  const i = t.search(/<!doctype html|<html[\s>]/i);
-  if (i > 0) t = t.slice(i);
-  return t.trim();
+  try { res=await fetch(url,{method:'POST',headers,body:JSON.stringify(body)}); }
+  catch(e){ throw new Error('Network/CORS error — the request never completed. Check the endpoint, and for local models confirm CORS is enabled (see settings).'); }
+  if(!res.ok){ let detail=''; try{ const j=await res.json(); detail=j.error?.message||j.message||JSON.stringify(j); }catch{ detail=await res.text().catch(()=> ''); }
+    throw new Error(`${res.status} ${res.statusText}${detail?' — '+detail:''}`); }
+  if(!res.body||!res.body.getReader){ const data=await res.json();
+    const full=isA?(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join(''):(data.choices?.[0]?.message?.content||'');
+    onText(full); return full; }
+  const reader=res.body.getReader(), dec=new TextDecoder(); let buf='', full='';
+  while(true){ const {value,done}=await reader.read(); if(done) break; buf+=dec.decode(value,{stream:true}); let nl;
+    while((nl=buf.indexOf('\n'))>=0){ const line=buf.slice(0,nl).trim(); buf=buf.slice(nl+1);
+      if(!line||line.startsWith(':')||line.startsWith('event:')) continue; if(!line.startsWith('data:')) continue;
+      const payload=line.slice(5).trim(); if(payload==='[DONE]') continue; let json; try{ json=JSON.parse(payload); }catch{ continue; }
+      let piece='';
+      if(isA){ if(json.type==='content_block_delta'&&json.delta?.type==='text_delta') piece=json.delta.text||''; else if(json.type==='error') throw new Error(json.error?.message||'stream error'); }
+      else { if(json.error) throw new Error(json.error.message||'stream error'); piece=json.choices?.[0]?.delta?.content||''; }
+      if(piece){ full+=piece; onText(full); } } }
+  return full;
 }
 
 /* ============================================================
-   5. Build flow
+   5. Message parsing (prose vs app code) + markdown-lite
    ============================================================ */
-async function runBuild(prompt){
-  if (busy) return;
-  prompt = prompt.trim();
-  if (!prompt) return;
-  if (settings.needsKey && !(settings.key||'').trim()) {
-    setStatus('Add an API key in settings first.', true);
-    openDrawer();
-    return;
-  }
-
-  let app = apps.find(a=>a.id===currentId);
-  const isNew = !app;
-  if (isNew) {
-    app = { id:'b_'+Date.now().toString(36), name:deriveName(prompt), messages:[], html:'', createdAt:Date.now(), updatedAt:Date.now() };
-    apps.unshift(app);
-    currentId = app.id;
-  }
-  app.messages.push({ role:'user', content:prompt });
-
-  setBusy(true);
-  setStatus('building…');
-  renderSidebar();
-  showWorkspace();
-
-  try {
-    const reply = await callModel(app.messages);
-    const html = extractHtml(reply);
-    if (!html) throw new Error('The model did not return an HTML document. Try rephrasing, or check the model is capable of code output.');
-    app.messages.push({ role:'assistant', content:reply });
-    app.html = html;
-    app.updatedAt = Date.now();
-    persist();
-    renderApp(app);
-    setStatus('');
-  } catch (e) {
-    // roll back the unanswered user turn so retry is clean
-    app.messages.pop();
-    if (isNew && app.messages.length===0) { apps = apps.filter(a=>a.id!==app.id); currentId=null; renderSidebar(); }
-    persist();
-    setStatus(e.message || String(e), true);
-    if (!app.html) showEmpty();
-  } finally {
-    setBusy(false);
-    renderSidebar();
-  }
+function splitMessage(text){
+  text = text||'';
+  let idx = text.search(/```html\b/i), fence = 7;
+  if(idx<0){ const g=text.indexOf('```'); if(g>=0 && /<!doctype html|<html[\s>]/i.test(text.slice(g))){ idx=g; fence=3; } }
+  if(idx<0){ const raw=text.search(/<!doctype html|<html[\s>]/i);
+    if(raw>=0) return { prose:text.slice(0,raw).trim(), code:text.slice(raw).trim(), building:false };
+    return { prose:text, code:'', building:false }; }
+  const after=text.slice(idx+fence), close=after.indexOf('```');
+  if(close<0) return { prose:text.slice(0,idx).trim(), code:after.replace(/^[a-z]*\n/i,'').trim(), building:true };
+  const code=after.slice(0,close).trim(), rest=after.slice(close+3);
+  return { prose:(text.slice(0,idx)+'\n'+rest).trim(), code, building:false };
 }
+function escapeHtml(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function md(t){ t=escapeHtml(t||'');
+  t=t.replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  t=t.replace(/\n{2,}/g,'</p><p>').replace(/\n/g,'<br>'); return '<p>'+t+'</p>'; }
 
-function deriveName(prompt){
-  const s = prompt.replace(/\s+/g,' ').trim();
-  return s.length>38 ? s.slice(0,38).trimEnd()+'…' : s || 'untitled';
+/* ============================================================
+   6. App injection + export
+   ============================================================ */
+function inject(html, scriptJs){ const tag='<scr'+'ipt>'+scriptJs+'</scr'+'ipt>';
+  if(/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, m=>m+tag);
+  if(/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, m=>m+tag);
+  return tag+html; }
+function usesLLM(code){ return /window\.llm|llm\.chat/.test(code||''); }
+function withDevBridge(code){ return usesLLM(code) ? inject(code, DEV_BRIDGE) : code; }
+function buildExport(code){
+  if(!usesLLM(code)) return code;
+  const p=PRESETS[settings.preset]||{label:'API'};
+  const cfg={ base:settings.base, format:settings.format, model:settings.model, needsKey:settings.needsKey, label:p.label, store:'workbench_app_key' };
+  return inject(code, '('+portableBridgeFn.toString()+')('+JSON.stringify(cfg)+');');
 }
 
 /* ============================================================
-   6. Rendering
+   7. DOM refs + view helpers
    ============================================================ */
 const $ = id => document.getElementById(id);
-const stage=$('stage'), screen=$('screen'), empty=$('empty'), dock=$('dockComposer');
-const preview=$('preview'), source=$('source'), titleInput=$('buildTitle');
+const mainGrid=$('mainGrid'), transcript=$('transcript'), screen=$('screen'), preview=$('preview'),
+      source=$('source'), titleInput=$('benchTitle');
+let lastCode='';   // current app code for this bench (clean)
 
-function showEmpty(){ empty.style.display='flex'; screen.style.display='none'; dock.style.display='none'; titleInput.value=''; titleInput.disabled=true; stage.classList.remove('show-source'); }
-function showWorkspace(){ empty.style.display='none'; screen.style.display='flex'; dock.style.display='flex'; titleInput.disabled=false; }
+function currentChat(){ return chats.find(c=>c.id===currentId); }
+function setHasApp(b){ mainGrid.classList.toggle('has-app', b); }
+function showPreviewTab(){ screen.classList.remove('show-source'); $('tabPreview').classList.add('active'); $('tabSource').classList.remove('active'); }
+function showSourceTab(){ screen.classList.add('show-source'); $('tabSource').classList.add('active'); $('tabPreview').classList.remove('active'); }
 
-function renderApp(app){
-  showWorkspace();
-  titleInput.value = app.name;
-  preview.srcdoc = app.html || '';
-  source.textContent = app.html || '';
+function setPreview(code){
+  lastCode = code||'';
+  preview.srcdoc = withDevBridge(lastCode);
+  source.textContent = buildExport(lastCode);
+  $('screenCap').textContent = usesLLM(lastCode)
+    ? 'Exports as a standalone file with a portable AI bridge — it asks whoever runs it for their own key.'
+    : 'Exports as a standalone file — no dependencies.';
+  setHasApp(!!lastCode);
 }
 
-function openApp(id){
-  currentId = id; persist();
-  const app = apps.find(a=>a.id===id);
-  if (app && app.html){ renderApp(app); } else if (app){ showWorkspace(); titleInput.value=app.name; preview.srcdoc=''; source.textContent=''; }
-  setStatus('');
-  renderSidebar();
-  closeRail();
-}
-
-function newBuild(){
-  currentId = null; persist();
-  showEmpty();
-  setStatus('');
-  renderSidebar();
-  $('emptyPrompt').value='';
-  $('emptyPrompt').focus();
-  closeRail();
-}
-
-function deleteApp(id, ev){
-  ev.stopPropagation();
-  apps = apps.filter(a=>a.id!==id);
-  if (currentId===id){ currentId=null; showEmpty(); }
-  persist(); renderSidebar();
-}
-
-function renderSidebar(){
-  const wrap = $('builds');
-  wrap.innerHTML='';
-  if (!apps.length){
-    wrap.innerHTML = '<div style="padding:10px 8px;color:var(--rail-muted);font-size:11px;">No builds yet.</div>';
+/* ============================================================
+   8. Chat rendering
+   ============================================================ */
+function renderTranscript(){
+  const chat=currentChat();
+  transcript.innerHTML='';
+  if(!chat || !chat.messages.length){
+    transcript.innerHTML = '<div class="hello"><div class="mark">◆</div><h1>New workbench.</h1>'+
+      '<p>Describe an idea and we\'ll build it here. Test it in the live preview, then export the finished app as a standalone file.</p></div>';
     return;
   }
-  apps.forEach(a=>{
-    const el = document.createElement('div');
-    el.className = 'build' + (a.id===currentId ? ' active':'');
-    el.innerHTML = `<span class="dot"></span><span class="name"></span><button class="kill" title="Delete">×</button>`;
-    el.querySelector('.name').textContent = a.name;
-    el.addEventListener('click', ()=>openApp(a.id));
-    el.querySelector('.kill').addEventListener('click', (e)=>deleteApp(a.id, e));
-    wrap.appendChild(el);
-  });
+  chat.messages.forEach(m=>transcript.appendChild(turnEl(m.role, m.content)));
+  transcript.scrollTop = transcript.scrollHeight;
 }
-
-function setBusy(b){
-  busy=b;
-  [$('emptyGo'), $('dockGo')].forEach(btn=>{
-    btn.disabled=b;
-    btn.innerHTML = b ? '<span class="spin"></span> building' : 'Build →';
-  });
+function turnEl(role, content){
+  const wrap=document.createElement('div'); wrap.className='turn '+role;
+  const who=document.createElement('div'); who.className='who'; who.textContent = role==='user'?'you':'workbench';
+  const bub=document.createElement('div'); bub.className='bubble';
+  wrap.appendChild(who); wrap.appendChild(bub);
+  paintBubble(bub, content, role);
+  return wrap;
 }
-function setStatus(msg, isErr){
-  const s=$('status');
-  s.className = 'status' + (isErr?' err':'');
-  s.innerHTML = msg ? (busy && !isErr ? '<span class="pulse"></span>' : '') + escapeHtml(msg) : '';
-}
-function escapeHtml(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-
-function renderBadge(){
-  const p = PRESETS[settings.preset];
-  $('badgeSrc').textContent = p ? p.label.toLowerCase() : 'custom';
-  $('badgeModel').textContent = settings.model ? '· '+settings.model : '';
-  const ok = !settings.needsKey || !!(settings.key||'').trim();
-  $('liveDot').className = 'live-dot' + (ok?'':' off');
+function paintBubble(bub, content, role){
+  if(role==='user'){ bub.innerHTML=md(content); return; }
+  const s=splitMessage(content);
+  bub.innerHTML = s.prose ? md(s.prose) : (s.code ? '<p class="muted">Built the app →</p>' : '');
+  if(s.code){
+    const chip=document.createElement('button'); chip.className='appchip';
+    chip.innerHTML='<span class="ic">◢</span> <b>app</b> <span class="st">'+(s.building?'building…':'open in preview ↗')+'</span>';
+    chip.addEventListener('click', ()=>{ setHasApp(true); showPreviewTab(); });
+    bub.appendChild(chip);
+  }
 }
 
 /* ============================================================
-   7. Settings drawer
+   9. Send / build flow
    ============================================================ */
-function renderPresets(){
-  const wrap=$('presets'); wrap.innerHTML='';
-  Object.entries(PRESETS).forEach(([id,p])=>{
-    const b=document.createElement('button');
-    b.className='preset'+(settings.preset===id?' active':'');
-    b.innerHTML = `${p.label}<small>${p.needsKey?'key required':'local · no key'}</small>`;
-    b.addEventListener('click', ()=>applyPreset(id));
-    wrap.appendChild(b);
-  });
+async function send(text){
+  if(busy) return; text=(text||'').trim(); if(!text) return;
+  if(settings.needsKey && !(settings.key||'').trim()){ setStatus('Add an API key in settings first.', true); openDrawer(); return; }
+  if(window.speechSynthesis) speechSynthesis.cancel();
+
+  let chat=currentChat();
+  if(!chat){ chat={ id:'c_'+Date.now().toString(36), name:deriveName(text), messages:[], createdAt:Date.now(), updatedAt:Date.now() };
+    chats.unshift(chat); currentId=chat.id; }
+  chat.messages.push({ role:'user', content:text });
+  const assistant={ role:'assistant', content:'' }; chat.messages.push(assistant);
+
+  setBusy(true); renderRail(); renderTranscript();
+  const liveBubble = transcript.lastChild.querySelector('.bubble');
+  liveBubble.classList.add('caret-blink');
+
+  const t0=Date.now(); let chars=0, sawCode=false;
+  const timer=setInterval(()=>{ setStatus(`<span class="pulse"></span>thinking… ${chars.toLocaleString()} chars · ${Math.round((Date.now()-t0)/1000)}s`); }, 250);
+  setStatus('<span class="pulse"></span>contacting model…');
+
+  let ok=false;
+  try{
+    const reply=await streamModel(chat.messages.slice(0,-1), (full)=>{
+      chars=full.length; assistant.content=full;
+      const s=splitMessage(full);
+      liveBubble.innerHTML = s.prose ? md(s.prose) : '';
+      liveBubble.classList.add('caret-blink');
+      if(s.code){
+        if(!sawCode){ sawCode=true; setHasApp(true); showSourceTab(); source.classList.add('streaming'); }
+        source.textContent=s.code; source.scrollTop=source.scrollHeight;
+        // re-add chip (innerHTML reset above wiped it)
+        const chip=document.createElement('button'); chip.className='appchip';
+        chip.innerHTML='<span class="ic">◢</span> <b>app</b> <span class="st">building…</span>';
+        chip.addEventListener('click', ()=>{ setHasApp(true); showSourceTab(); });
+        liveBubble.appendChild(chip);
+      }
+    }, SYSTEM_PROMPT);
+
+    assistant.content=reply; liveBubble.classList.remove('caret-blink'); source.classList.remove('streaming');
+    const s=splitMessage(reply);
+    paintBubble(liveBubble, reply, 'assistant');
+    if(s.code){ setPreview(s.code); showPreviewTab(); }
+    chat.updatedAt=Date.now(); persist();
+    if(speakOn && s.prose) speak(s.prose);
+    ok=true;
+  }catch(e){
+    chat.messages.pop(); chat.messages.pop();   // drop assistant + user
+    if(chat.messages.length===0){ chats=chats.filter(c=>c.id!==chat.id); currentId=null; }
+    persist(); renderTranscript(); setStatus(e.message||String(e), true);
+  }finally{
+    clearInterval(timer); source.classList.remove('streaming'); setBusy(false); renderRail();
+    if(ok){ setStatus(`done · ${chars.toLocaleString()} chars · ${Math.round((Date.now()-t0)/1000)}s`); transcript.scrollTop=transcript.scrollHeight; }
+  }
 }
-function applyPreset(id){
-  const p=PRESETS[id];
-  settings.preset=id; settings.format=p.format; settings.base=p.base; settings.model=p.model; settings.needsKey=p.needsKey;
-  syncDrawerFields();
-  renderPresets();
+function deriveName(t){ const s=t.replace(/\s+/g,' ').trim(); return s.length>34?s.slice(0,34).trimEnd()+'…':s||'untitled'; }
+
+/* ============================================================
+   10. Bench (session) management
+   ============================================================ */
+function openChat(id){
+  currentId=id; persist();
+  const chat=currentChat();
+  titleInput.value = chat?chat.name:''; titleInput.disabled=!chat;
+  renderTranscript();
+  // restore latest app in this bench
+  let code=''; if(chat) for(let i=chat.messages.length-1;i>=0;i--){ const s=splitMessage(chat.messages[i].content); if(s.code){ code=s.code; break; } }
+  if(code){ setPreview(code); showPreviewTab(); } else { setHasApp(false); lastCode=''; }
+  setStatus(''); renderRail(); closeRail();
 }
-function syncDrawerFields(){
-  $('fBase').value=settings.base;
-  $('fModel').value=settings.model;
-  $('fKey').value=settings.key||'';
-  $('keyField').style.display = settings.needsKey ? 'flex':'none';
-  const p=PRESETS[settings.preset];
-  $('modelHelp').innerHTML = p && p.modelsUrl ? `Set any model id. <a href="${p.modelsUrl}" target="_blank" rel="noopener">model list ↗</a>` : 'Set the model id your server is running.';
-  $('corsNote').textContent = p ? p.cors : '';
-}
-function openDrawer(){ renderPresets(); syncDrawerFields(); $('scrim').classList.add('open'); $('drawer').classList.add('open'); }
-function closeDrawer(){ $('scrim').classList.remove('open'); $('drawer').classList.remove('open'); }
-function saveSettings(){
-  settings.base=$('fBase').value.trim();
-  settings.model=$('fModel').value.trim();
-  settings.key=$('fKey').value;
-  // if the endpoint no longer matches the preset, mark as custom-ish but keep format
-  persistSettings(); renderBadge(); closeDrawer();
-  setStatus('');
+function newChat(){ currentId=null; persist(); setHasApp(false); lastCode=''; titleInput.value=''; titleInput.disabled=true;
+  renderTranscript(); setStatus(''); renderRail(); $('prompt').focus(); closeRail(); }
+function deleteChat(id, ev){ ev.stopPropagation(); chats=chats.filter(c=>c.id!==id);
+  if(currentId===id){ currentId=null; newChat(); } persist(); renderRail(); }
+
+function renderRail(){
+  const wrap=$('list'); wrap.innerHTML='';
+  if(!chats.length){ wrap.innerHTML='<div style="padding:10px 8px;color:var(--rail-muted);font-size:11px;">Nothing yet.</div>'; return; }
+  chats.forEach(c=>{ const el=document.createElement('div'); el.className='row'+(c.id===currentId?' active':'');
+    el.innerHTML='<span class="dot"></span><span class="name"></span><button class="kill" title="Delete">×</button>';
+    el.querySelector('.name').textContent=c.name;
+    el.addEventListener('click', ()=>openChat(c.id));
+    el.querySelector('.kill').addEventListener('click', e=>deleteChat(c.id,e));
+    wrap.appendChild(el); });
 }
 
 /* ============================================================
-   8. Export / import all builds
+   11. Status / busy / badge
    ============================================================ */
-function exportAll(){
-  const blob=new Blob([JSON.stringify({version:1, apps}, null, 2)], {type:'application/json'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download='workbench-builds.json'; a.click();
-  URL.revokeObjectURL(url);
-}
-function importAll(file){
-  const r=new FileReader();
-  r.onload=()=>{
-    try {
-      const data=JSON.parse(r.result);
-      const incoming = Array.isArray(data) ? data : data.apps;
-      if (!Array.isArray(incoming)) throw 0;
-      const ids=new Set(apps.map(a=>a.id));
-      incoming.forEach(a=>{ if(a&&a.id&&!ids.has(a.id)) apps.push(a); });
-      persist(); renderSidebar(); setStatus(`Imported ${incoming.length} build(s).`);
-    } catch { setStatus('That file is not a valid builds export.', true); }
-  };
-  r.readAsText(file);
-}
-
-/* current-app file actions */
-function currentApp(){ return apps.find(a=>a.id===currentId); }
-function copyHtml(){ const a=currentApp(); if(!a) return; navigator.clipboard?.writeText(a.html).then(()=>flash($('copyBtn'),'copied')); }
-function downloadHtml(){ const a=currentApp(); if(!a) return;
-  const blob=new Blob([a.html],{type:'text/html'}); const url=URL.createObjectURL(blob);
-  const el=document.createElement('a'); el.href=url; el.download=(a.name||'app').replace(/[^\w-]+/g,'_')+'.html'; el.click(); URL.revokeObjectURL(url); }
-function openHtml(){ const a=currentApp(); if(!a) return;
-  const blob=new Blob([a.html],{type:'text/html'}); const url=URL.createObjectURL(blob); window.open(url,'_blank'); }
-function flash(btn,txt){ const o=btn.textContent; btn.textContent=txt; setTimeout(()=>btn.textContent=o,1100); }
+function setBusy(b){ busy=b; const btn=$('sendBtn'); btn.disabled=b; btn.innerHTML=b?'<span class="spin"></span>':'Send →'; }
+function setStatus(html, isErr){ const s=$('status'); s.className='status'+(isErr?' err':''); s.innerHTML = isErr?escapeHtml(html):(html||''); }
+function renderBadge(){ const p=PRESETS[settings.preset]; $('badgeSrc').textContent=p?p.label.toLowerCase():'custom';
+  $('badgeModel').textContent=settings.model?'· '+settings.model:''; const okk=!settings.needsKey||!!(settings.key||'').trim();
+  $('liveDot').className='live-dot'+(okk?'':' off'); }
 
 /* ============================================================
-   9. Wiring
+   12. window.llm bridge — parent side (dev preview only)
    ============================================================ */
-function autoGrow(t){ t.style.height='auto'; t.style.height=Math.min(t.scrollHeight,160)+'px'; }
-['emptyPrompt','dockPrompt'].forEach(id=>{
-  const t=$(id);
-  t.addEventListener('input', ()=>autoGrow(t));
-  t.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); const v=t.value; t.value=''; autoGrow(t); runBuild(v); } });
+window.addEventListener('message', async (e)=>{
+  const d=e.data; if(!d||!d.__llm) return; if(e.source!==preview.contentWindow) return;
+  const post=f=>{ try{ e.source.postMessage(f,'*'); }catch{} };
+  let prev=0;
+  try{
+    const full=await streamModel(d.messages, (txt)=>{ if(d.stream){ post({__llmResult:true,id:d.id,type:'token',text:txt.slice(prev),full:txt}); prev=txt.length; } }, null);
+    post({__llmResult:true,id:d.id,type:'done',text:full});
+  }catch(err){ post({__llmResult:true,id:d.id,type:'error',error:(err&&err.message)||String(err)}); }
 });
-$('emptyGo').addEventListener('click', ()=>{ const v=$('emptyPrompt').value; $('emptyPrompt').value=''; runBuild(v); });
-$('dockGo').addEventListener('click', ()=>{ const v=$('dockPrompt').value; $('dockPrompt').value=''; runBuild(v); });
 
-$('newBtn').addEventListener('click', newBuild);
+/* ============================================================
+   13. Voice — dictation (STT) + read-aloud (TTS)
+   ============================================================ */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recog=null, listening=false;
+function toggleMic(){
+  if(!SR){ setStatus('Voice input needs Chrome or Edge.', true); return; }
+  if(listening){ recog.stop(); return; }
+  recog=new SR(); recog.lang='en-US'; recog.interimResults=true; recog.continuous=false;
+  const base=$('prompt').value;
+  recog.onresult=ev=>{ let t=''; for(let i=ev.resultIndex;i<ev.results.length;i++) t+=ev.results[i][0].transcript;
+    $('prompt').value=(base?base+' ':'')+t; autoGrow($('prompt')); };
+  recog.onend=()=>{ listening=false; $('micBtn').classList.remove('on'); };
+  recog.onerror=()=>{ listening=false; $('micBtn').classList.remove('on'); };
+  recog.start(); listening=true; $('micBtn').classList.add('on');
+}
+function speak(text){ if(!window.speechSynthesis) return; const clean=(text||'').replace(/```[\s\S]*?```/g,' ').replace(/[*`#]/g,'').trim();
+  if(!clean) return; speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(clean); u.rate=1.03; speechSynthesis.speak(u); }
+function toggleSpeak(){ speakOn=!speakOn; persistSettings();
+  $('speakBtn').classList.toggle('on', speakOn); $('speakBtn').textContent = speakOn?'🔊 voice on':'🔊 voice off';
+  if(!speakOn && window.speechSynthesis) speechSynthesis.cancel(); }
+
+/* ============================================================
+   14. Settings drawer
+   ============================================================ */
+function renderPresets(){ const wrap=$('presets'); wrap.innerHTML='';
+  Object.entries(PRESETS).forEach(([id,p])=>{ const b=document.createElement('button');
+    b.className='preset'+(settings.preset===id?' active':''); b.innerHTML=`${p.label}<small>${p.needsKey?'key required':'local · no key'}</small>`;
+    b.addEventListener('click', ()=>applyPreset(id)); wrap.appendChild(b); }); }
+function applyPreset(id){ const p=PRESETS[id]; settings.preset=id; settings.format=p.format; settings.base=p.base; settings.model=p.model; settings.needsKey=p.needsKey; syncDrawer(); renderPresets(); }
+function syncDrawer(){ $('fBase').value=settings.base; $('fModel').value=settings.model; $('fKey').value=settings.key||'';
+  $('keyField').style.display=settings.needsKey?'flex':'none'; const p=PRESETS[settings.preset];
+  $('modelHelp').innerHTML = p&&p.modelsUrl?`Set any model id. <a href="${p.modelsUrl}" target="_blank" rel="noopener">model list ↗</a>`:'Set the model id your server is running.';
+  $('corsNote').textContent = p?p.cors:''; }
+function openDrawer(){ renderPresets(); syncDrawer(); $('scrim').classList.add('open'); $('drawer').classList.add('open'); }
+function closeDrawer(){ $('scrim').classList.remove('open'); $('drawer').classList.remove('open'); }
+function saveSettings(){ settings.base=$('fBase').value.trim(); settings.model=$('fModel').value.trim(); settings.key=$('fKey').value;
+  persistSettings(); renderBadge(); if(lastCode) setPreview(lastCode); closeDrawer(); setStatus(''); }
+
+/* ============================================================
+   15. Export current app + back up / restore all benches
+   ============================================================ */
+function copyApp(){ if(!lastCode) return; navigator.clipboard?.writeText(buildExport(lastCode)).then(()=>flash($('copyBtn'),'copied')); }
+function downloadApp(){ if(!lastCode) return; const name=(currentChat()?.name||'app').replace(/[^\w-]+/g,'_');
+  dl(buildExport(lastCode), name+'.html', 'text/html'); }
+function openApp(){ if(!lastCode) return; const blob=new Blob([buildExport(lastCode)],{type:'text/html'}); window.open(URL.createObjectURL(blob),'_blank'); }
+function flash(btn,txt){ const o=btn.textContent; btn.textContent=txt; setTimeout(()=>btn.textContent=o,1100); }
+function dl(text, filename, type){ const blob=new Blob([text],{type}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url); }
+function backupAll(){ dl(JSON.stringify({version:2, chats}, null, 2), 'workbench-backup.json', 'application/json'); }
+function restoreAll(file){ const r=new FileReader(); r.onload=()=>{ try{ const data=JSON.parse(r.result);
+  const incoming=Array.isArray(data)?data:data.chats; if(!Array.isArray(incoming)) throw 0;
+  const ids=new Set(chats.map(c=>c.id)); incoming.forEach(c=>{ if(c&&c.id&&!ids.has(c.id)) chats.push(c); });
+  persist(); renderRail(); setStatus(`Restored ${incoming.length} workbench(es).`);
+  }catch{ setStatus('That file is not a valid backup.', true); } }; r.readAsText(file); }
+
+/* ============================================================
+   16. Wiring
+   ============================================================ */
+function autoGrow(t){ t.style.height='auto'; t.style.height=Math.min(t.scrollHeight,170)+'px'; }
+const promptEl=$('prompt');
+promptEl.addEventListener('input', ()=>autoGrow(promptEl));
+promptEl.addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); const v=promptEl.value; promptEl.value=''; autoGrow(promptEl); send(v); } });
+$('sendBtn').addEventListener('click', ()=>{ const v=promptEl.value; promptEl.value=''; autoGrow(promptEl); send(v); });
+$('micBtn').addEventListener('click', toggleMic);
+$('speakBtn').addEventListener('click', toggleSpeak);
+
+$('newBtn').addEventListener('click', newChat);
 $('gearBtn').addEventListener('click', openDrawer);
 $('closeDrawer').addEventListener('click', closeDrawer);
 $('scrim').addEventListener('click', closeDrawer);
 $('saveSettings').addEventListener('click', saveSettings);
 
-$('srcToggle').addEventListener('click', ()=>{ stage.classList.toggle('show-source'); $('srcToggle').classList.toggle('toggled'); });
-$('copyBtn').addEventListener('click', copyHtml);
-$('dlBtn').addEventListener('click', downloadHtml);
-$('openBtn').addEventListener('click', openHtml);
+$('tabPreview').addEventListener('click', showPreviewTab);
+$('tabSource').addEventListener('click', showSourceTab);
+$('copyBtn').addEventListener('click', copyApp);
+$('dlBtn').addEventListener('click', downloadApp);
+$('openBtn').addEventListener('click', openApp);
 
-$('exportBtn').addEventListener('click', exportAll);
+$('exportBtn').addEventListener('click', backupAll);
 $('importBtn').addEventListener('click', ()=>$('importFile').click());
-$('importFile').addEventListener('change', e=>{ if(e.target.files[0]) importAll(e.target.files[0]); e.target.value=''; });
+$('importFile').addEventListener('change', e=>{ if(e.target.files[0]) restoreAll(e.target.files[0]); e.target.value=''; });
 
-titleInput.addEventListener('change', ()=>{ const a=currentApp(); if(a){ a.name=titleInput.value.trim()||'untitled'; titleInput.value=a.name; persist(); renderSidebar(); } });
+titleInput.addEventListener('change', ()=>{ const c=currentChat(); if(c){ c.name=titleInput.value.trim()||'untitled'; titleInput.value=c.name; persist(); renderRail(); } });
 titleInput.addEventListener('keydown', e=>{ if(e.key==='Enter') titleInput.blur(); });
-
 $('railToggle').addEventListener('click', ()=>$('rail').classList.toggle('open'));
 function closeRail(){ $('rail').classList.remove('open'); }
 
 /* ============================================================
-   10. Boot
+   17. Boot
    ============================================================ */
 function boot(){
-  renderBadge();
-  renderSidebar();
-  const a = currentApp();
-  if (a && a.html){ renderApp(a); }
-  else if (a){ showWorkspace(); titleInput.value=a.name; preview.srcdoc=''; }
-  else { showEmpty(); }
-  if (settings.needsKey && !(settings.key||'').trim()){
-    setStatus('Set a provider and key in settings to start.', false);
-  }
+  renderBadge(); renderRail();
+  $('speakBtn').classList.toggle('on', speakOn); $('speakBtn').textContent = speakOn?'🔊 voice on':'🔊 voice off';
+  if(!SR){ $('micBtn').title='Voice input needs Chrome/Edge'; $('micBtn').style.opacity=.5; }
+  const c=currentChat();
+  if(c){ openChat(c.id); } else { newChat(); }
+  if(settings.needsKey && !(settings.key||'').trim()) setStatus('Set a provider and key in settings to start.');
 }
 boot();
 </script>
