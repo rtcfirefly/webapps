@@ -27,7 +27,9 @@
   input, textarea { font-family:var(--mono); }
   a { color:var(--accent); }
 
-  .app { display:grid; grid-template-columns:248px 1fr; height:100vh; }
+  .app { display:grid; grid-template-columns:248px 1fr;
+         grid-template-rows:100vh; grid-template-rows:100dvh;
+         height:100vh; height:100dvh; overflow:hidden; }
 
   /* ---- control rail ---- */
   .rail { background:var(--rail); color:var(--rail-ink); display:flex; flex-direction:column;
@@ -177,6 +179,8 @@
     .rail-toggle { display:inline-flex; }
     .main.has-app { grid-template-columns:1fr; grid-template-rows:minmax(0,1fr) minmax(0,.9fr); }
     .chat-col { border-right:none; border-bottom:1px solid var(--line); }
+    .model-badge { display:none; }
+    .bench-title { max-width:120px; }
   }
   @media (prefers-reduced-motion: reduce) { * { animation-duration:.001ms !important; transition-duration:.001ms !important; } }
 </style>
