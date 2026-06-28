@@ -135,7 +135,7 @@
 
   // ----- always-on mic ----------------------------------------------------
   function startMic() {
-    if (!active || muted) return;
+    if (!active || muted || document.hidden) return;   // mic can't run while backgrounded
     if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
     rec = Sp().create({
       onStart: function () { refreshState(); },
@@ -149,7 +149,7 @@
         var t = (finalText || lastFinal || '').trim();
         lastFinal = '';
         handleFinal(t);
-        if (active && !muted) restartTimer = setTimeout(startMic, 300); // keep the mic open
+        if (active && !muted && !document.hidden) restartTimer = setTimeout(startMic, 300); // keep the mic open
       }
     });
     if (!rec) return;
@@ -242,6 +242,7 @@
     U().openCall();
     U().setCallState('connecting');
     startTimer();
+    requestWakeLock();   // keep the screen awake so the call isn't killed by auto-lock
     startMic();
     say('Hey, coach here. What did you train today?');
   }
@@ -268,10 +269,46 @@
     Sp().cancelSpeech();
     pending = 0;
     stopTimer();
+    releaseWakeLock();
     U().setCallState('ended');
     U().closeCall();
     U().renderSession(S().getCurrentSession());
     U().refreshHistory();
+  }
+
+  // ----- background / screen-wake handling --------------------------------
+  // The mic can't run while the page is hidden (browser privacy restriction), so
+  // the best we can do is (a) hold a screen Wake Lock so the device doesn't auto-
+  // lock mid-call, and (b) cleanly pause on background and resume when visible.
+  var wakeLock = null;
+  function requestWakeLock() {
+    try {
+      if (navigator.wakeLock && navigator.wakeLock.request && !document.hidden) {
+        navigator.wakeLock.request('screen').then(function (wl) {
+          wakeLock = wl;
+          if (wl.addEventListener) wl.addEventListener('release', function () { wakeLock = null; });
+        }).catch(function () {});
+      }
+    } catch (e) {}
+  }
+  function releaseWakeLock() {
+    if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
+  }
+  function onVisibility() {
+    if (!active) return;
+    if (document.hidden) {
+      // Backgrounded: the OS suspends the recognizer anyway. Stop our restart
+      // loop so it doesn't error-spam, but keep the call "active".
+      if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
+      if (rec) { try { rec.stop(); } catch (e) {} }
+    } else {
+      requestWakeLock();          // wake locks are auto-released on hide — re-acquire
+      if (!muted) startMic();     // resume listening
+      refreshState();
+    }
+  }
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('visibilitychange', onVisibility);
   }
 
   App.Call = {

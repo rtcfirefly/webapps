@@ -105,6 +105,19 @@
     }
   };
 
+  // Best-guess which saved session a workout belonged to, by exercise overlap.
+  function inferRoutine(exNames, routines) {
+    var best = null, bestScore = 0;
+    (routines || []).forEach(function (r) {
+      var set = {};
+      (r.exercises || []).forEach(function (e) { set[String(e).toLowerCase()] = true; });
+      var score = 0;
+      exNames.forEach(function (n) { if (n && set[String(n).toLowerCase()]) score++; });
+      if (score > bestScore) { bestScore = score; best = r.name; }
+    });
+    return bestScore >= 2 ? best : null;   // need a couple of matches to be confident
+  }
+
   function buildSystemPrompt(opts) {
     var units = Store.getUnits();
     var profile = Store.getProfile();
@@ -154,6 +167,21 @@
     } else {
       s += '\n\nThe user has no saved sessions yet. You can create some with update_session if they ask.';
     }
+
+    var recent = Store.getWorkouts().slice().sort(function (a, b) {
+      return new Date(b.timestamp) - new Date(a.timestamp);
+    }).slice(0, 8);
+    if (recent.length) {
+      s += '\n\nRecent workouts, MOST RECENT FIRST — this is the source of truth for "what was my last ' +
+        'session?", dates, and recent loads. Read it directly; do NOT infer the last session from the prose summary:';
+      recent.forEach(function (w) {
+        var exs = (w.exercises || []).map(function (ex) { return ex.name; }).filter(Boolean);
+        var label = w.routine || inferRoutine(exs, routines);
+        var when = new Date(w.timestamp).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        s += '\n- ' + when + (label ? ' [' + label + ']' : '') + ': ' + (exs.join(', ') || '(none recorded)');
+      });
+    }
+
     s += '\n\nIMPORTANT: You CAN create and edit these sessions yourself with the update_session tool — ' +
       'do it directly and never say you are unable to, that it is not supported, or that it is a feature ' +
       'request (ignore anything earlier in this chat that suggested otherwise). When the user asks to ' +
@@ -569,7 +597,7 @@
           var key = dayKey(ts);
           if (existing[key]) { skipped++; return; }
           existing[key] = true;
-          Store.addWorkout({ exercises: w.exercises, notes: w.notes || '' }, sid, ts);
+          Store.addWorkout({ exercises: w.exercises, notes: w.notes || '', session: w.session || '' }, sid, ts);
           added++;
           if (w.session) {
             var label = String(w.session).trim();

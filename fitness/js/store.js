@@ -124,6 +124,7 @@
         id: uid(),
         timestamp: timestamp || new Date().toISOString(),
         sessionId: sessionId || null,
+        routine: (input.session || input.routine || '') || null,  // which session/template this was
         exercises: Array.isArray(input.exercises) ? input.exercises : [],
         notes: input.notes || ''
       };

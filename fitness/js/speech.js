@@ -16,13 +16,28 @@
 
   function listVoices() { return synth ? (synth.getVoices() || []) : []; }
 
-  // Rank installed voices: prefer modern "natural/neural/enhanced" voices,
-  // then Google voices, then any US English, then any English.
+  // A "network"/remote voice generally sounds far better than an on-device one.
+  // On Android the good Google voices (e.g. en-us-x-iom-network) are exposed with
+  // localService === false but have no quality keyword in their name — so we must
+  // detect them via localService / the voiceURI, not just the display name.
+  function isNetwork(v) {
+    if (v && v.localService === false) return true;
+    var id = (v && (v.voiceURI || v.name)) || '';
+    return /network/i.test(id);
+  }
+
+  // Rank installed voices: prefer network voices, then modern
+  // natural/neural/enhanced/Google voices, then any US English, then any English.
   function bestVoice(list) {
     var en = list.filter(function (v) { return /^en/i.test(v.lang); });
     var pool = en.length ? en : list;
-    function pick(re) { return pool.filter(function (v) { return re.test(v.name); })[0]; }
-    return pick(/natural|neural|enhanced|premium/i) ||
+    function pick(re) { return pool.filter(function (v) { return re.test(v.name || ''); })[0]; }
+    var network = pool.filter(isNetwork);
+    function pickNet(re) { return network.filter(function (v) { return re.test(v.name || v.voiceURI || ''); })[0]; }
+    return pickNet(/natural|neural|enhanced|premium|google/i) ||
+           network.filter(function (v) { return /en[-_]US/i.test(v.lang); })[0] ||
+           network[0] ||
+           pick(/natural|neural|enhanced|premium/i) ||
            pick(/google/i) ||
            pick(/samantha|aria|jenny|libby|sonia/i) ||
            pool.filter(function (v) { return /en[-_]US/i.test(v.lang); })[0] ||
@@ -106,6 +121,7 @@
     speak: speak,
     cancelSpeech: cancelSpeech,
     listVoices: listVoices,         // for the Settings picker
-    onVoices: onVoices              // fires when the async voice list is ready
+    onVoices: onVoices,             // fires when the async voice list is ready
+    isNetwork: isNetwork            // true for higher-quality remote voices
   };
 })();

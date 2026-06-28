@@ -775,10 +775,14 @@
     App.Speech.onVoices(populateVoices); // fires now if ready, and again when loaded
   }
   function populateVoices() {
+    var net = App.Speech.isNetwork;
+    // English first, then higher-quality network voices, then by name.
     var list = App.Speech.listVoices().slice().sort(function (a, b) {
       var ae = /^en/i.test(a.lang) ? 0 : 1, be = /^en/i.test(b.lang) ? 0 : 1;
       if (ae !== be) return ae - be;
-      return a.name.localeCompare(b.name);
+      var an = net(a) ? 0 : 1, bn = net(b) ? 0 : 1;
+      if (an !== bn) return an - bn;
+      return (a.name || '').localeCompare(b.name || '');
     });
     el.voiceSelect.innerHTML = '';
     var auto = document.createElement('option');
@@ -786,7 +790,8 @@
     el.voiceSelect.appendChild(auto);
     list.forEach(function (v) {
       var o = document.createElement('option');
-      o.value = v.name; o.textContent = v.name + ' (' + v.lang + ')';
+      o.value = v.name;
+      o.textContent = v.name + ' (' + v.lang + ')' + (net(v) ? ' — HQ' : '');
       el.voiceSelect.appendChild(o);
     });
     el.voiceSelect.value = Store.getVoice() || '';
