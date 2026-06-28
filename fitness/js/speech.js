@@ -58,10 +58,24 @@
   function notifyVoices() { voiceListeners.forEach(function (cb) { try { cb(); } catch (e) {} }); }
   function onVoices(cb) { voiceListeners.push(cb); if (listVoices().length) cb(); }
 
+  // Android Chrome often returns an empty/short list on load and may never fire
+  // `onvoiceschanged`. Poll a few seconds until the count stabilises, notifying
+  // listeners whenever it grows so the picker re-populates.
+  var lastVoiceCount = -1;
+  function pollVoices(triesLeft) {
+    var n = listVoices().length;
+    if (n !== lastVoiceCount) { lastVoiceCount = n; if (n) notifyVoices(); }
+    if (triesLeft > 0) setTimeout(function () { pollVoices(triesLeft - 1); }, 500);
+  }
+
   if (synth) {
     try { synth.getVoices(); } catch (e) {}            // kick off async load
     try { synth.onvoiceschanged = notifyVoices; } catch (e) {}
+    pollVoices(12);                                    // ~6s of retries for slow engines
   }
+
+  // Force a fresh enumeration (e.g. when the Settings screen opens).
+  function refreshVoices() { try { synth && synth.getVoices(); } catch (e) {} notifyVoices(); }
 
   /* One-shot recognizer. Auto-ends on silence; we restart it for continuous call flow.
    * cb: { onStart, onInterim(text), onFinal(text), onError(code), onEnd(finalText) } */
@@ -122,6 +136,7 @@
     cancelSpeech: cancelSpeech,
     listVoices: listVoices,         // for the Settings picker
     onVoices: onVoices,             // fires when the async voice list is ready
+    refreshVoices: refreshVoices,   // re-enumerate (Android workaround)
     isNetwork: isNetwork            // true for higher-quality remote voices
   };
 })();

@@ -232,6 +232,7 @@
     if (name === 'history') refreshHistory();
     if (name === 'exercises') refreshExercises();
     if (name === 'sessions') refreshSessions();
+    if (name === 'settings' && App.Speech && App.Speech.refreshVoices) App.Speech.refreshVoices();
     if (name === 'coach') scrollChatToBottom();
   }
 
@@ -786,7 +787,8 @@
     });
     el.voiceSelect.innerHTML = '';
     var auto = document.createElement('option');
-    auto.value = ''; auto.textContent = 'Automatic (best available)';
+    auto.value = '';
+    auto.textContent = 'Automatic (best available)' + (list.length ? ' — ' + list.length + ' voices' : '');
     el.voiceSelect.appendChild(auto);
     list.forEach(function (v) {
       var o = document.createElement('option');
