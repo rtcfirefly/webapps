@@ -1,0 +1,14 @@
+{
+  "name": "Fitness Coach",
+  "short_name": "Coach",
+  "description": "Voice/text workout logger and AI coach. Bring your own Anthropic API key.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://api.anthropic.com; frame-src https://www.youtube-nocookie.com; manifest-src 'self'; base-uri 'none'; form-action 'none'" />
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#0b1120" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Coach" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css?v=3" />
+  <title>Fitness Coach</title>
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <h1 id="topbar-title">Coach</h1>
+      <div class="topbar-actions" id="topbar-actions">
+        <button id="call-btn" class="pill-btn" type="button" aria-label="Start voice call">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+          <span>Call</span>
+        </button>
+        <button id="finish-btn" class="icon-ghost" type="button" aria-label="End chat and update summary" title="End chat &amp; update summary">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <!-- COACH -->
+      <section id="screen-coach" class="screen active" aria-label="Coach chat">
+        <div id="chat" class="chat" aria-live="polite"></div>
+        <form id="composer" class="composer" autocomplete="off">
+          <button id="mic-btn" class="icon-btn mic" type="button" aria-label="Voice input">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+          </button>
+          <textarea id="msg-input" rows="1" placeholder="Tell me about your workout…"
+                    aria-label="Message"></textarea>
+          <button id="send-btn" class="icon-btn send" type="submit" aria-label="Send">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </form>
+      </section>
+
+      <!-- HISTORY -->
+      <section id="screen-history" class="screen scroll" aria-label="History">
+        <div class="summary-card">
+          <h2>What the coach knows</h2>
+          <p id="summary-text">No history yet.</p>
+          <small id="summary-updated"></small>
+        </div>
+        <div id="stats" class="stats"></div>
+        <div id="history-list" class="history-list"></div>
+        <button id="clear-history-btn" class="danger-btn" type="button" hidden>Clear all logged workouts</button>
+      </section>
+
+      <!-- EXERCISES -->
+      <section id="screen-exercises" class="screen scroll" aria-label="Exercises">
+        <div id="exercise-list" class="exercise-list"></div>
+      </section>
+
+      <!-- SESSIONS -->
+      <section id="screen-sessions" class="screen scroll" aria-label="Sessions">
+        <button id="new-session-btn" class="primary-btn" type="button">+ New session</button>
+        <button id="suggest-sessions-btn" class="ghost-btn" type="button">✨ Build sessions from my history</button>
+        <div id="session-list" class="session-list"></div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section id="screen-settings" class="screen scroll" aria-label="Settings">
+        <form id="settings-form" autocomplete="off">
+          <label class="field">Anthropic API key
+            <div class="key-row">
+              <input id="api-key" type="password" inputmode="text" autocomplete="off"
+                     placeholder="sk-ant-…" spellcheck="false" />
+              <button id="toggle-key" class="ghost-btn" type="button">Show</button>
+            </div>
+          </label>
+
+          <label class="field">Model
+            <select id="model-select">
+              <option value="claude-sonnet-4-6">Sonnet 4.6 — balanced (default)</option>
+              <option value="claude-haiku-4-5-20251001">Haiku 4.5 — fast &amp; cheap</option>
+              <option value="claude-opus-4-8">Opus 4.8 — most capable</option>
+              <option value="__custom__">Custom model id…</option>
+            </select>
+          </label>
+          <label class="field" id="custom-model-wrap" hidden>Custom model id
+            <input id="custom-model" type="text" placeholder="claude-…" spellcheck="false" />
+          </label>
+
+          <label class="field">Units
+            <select id="units-select">
+              <option value="lb">Pounds (lb)</option>
+              <option value="kg">Kilograms (kg)</option>
+            </select>
+          </label>
+
+          <div class="field" id="voice-field">
+            <label for="voice-select">Coach voice</label>
+            <select id="voice-select"></select>
+            <button id="voice-preview" class="ghost-btn" type="button">▶ Preview voice</button>
+            <small class="hint-text">Voice quality depends on what your device has installed. On
+              Chrome/Android the “Google” / “Natural” voices sound best; on iOS/macOS download an
+              Enhanced or Premium voice in system Accessibility settings.</small>
+          </div>
+
+          <fieldset class="field">
+            <legend>Profile (optional)</legend>
+            <label class="field">Name
+              <input id="profile-name" type="text" placeholder="Your name" />
+            </label>
+            <label class="field">Goals
+              <textarea id="profile-goals" rows="2" placeholder="e.g. build strength, run a 10k"></textarea>
+            </label>
+            <label class="field">Equipment
+              <textarea id="profile-equipment" rows="2" placeholder="e.g. home gym, dumbbells, pull-up bar"></textarea>
+            </label>
+          </fieldset>
+
+          <button class="primary-btn" type="submit">Save settings</button>
+        </form>
+
+        <fieldset class="field import-box">
+          <legend>Import training history</legend>
+          <p class="hint-text">Paste past workouts or notes in any format. The coach turns them into your
+            history summary and logs the workouts.</p>
+          <textarea id="import-text" rows="4"
+            placeholder="e.g. Been lifting 3x/week for a year. Mon: bench 3x8 @135, squat 3x5 @185. Wed: 5k run 27 min. Left shoulder gets tweaky on overhead press…"></textarea>
+          <button id="import-btn" class="ghost-btn" type="button">Import history</button>
+          <small id="import-status" class="hint-text"></small>
+        </fieldset>
+
+        <fieldset class="field import-box">
+          <legend>Backup &amp; restore</legend>
+          <p class="hint-text">Export everything (workouts, summary, sessions, settings, pinned videos)
+            to a file, or restore from one. Your API key is never included in the export.</p>
+          <div class="danger-row">
+            <button id="export-btn" class="ghost-btn" type="button">Export data</button>
+            <button id="import-data-btn" class="ghost-btn" type="button">Import data</button>
+          </div>
+          <input id="import-file" type="file" accept="application/json,.json" hidden />
+          <small id="backup-status" class="hint-text"></small>
+        </fieldset>
+
+        <div class="danger-zone">
+          <p class="note">
+            ⚠️ Your API key is stored in this browser’s local storage and sent directly to
+            Anthropic from your device (<code>anthropic-dangerous-direct-browser-access</code>).
+            Use this only on a personal device, ideally with a scoped, low-limit key. Don’t host
+            it on a public site.
+          </p>
+          <p class="note" id="mic-hint" hidden>
+            🎤 The voice button isn’t available in this browser — tap the microphone on your phone’s
+            keyboard to dictate into the message box instead.
+          </p>
+          <div class="danger-row">
+            <button id="clear-key-btn" class="ghost-btn" type="button">Clear API key</button>
+            <button id="clear-all-btn" class="danger-btn" type="button">Clear all data</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <nav class="tabbar">
+      <button data-screen="coach" class="active" type="button">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z"/></svg>
+        <span class="tab-lbl">Coach</span>
+      </button>
+      <button data-screen="history" type="button">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 14l3-4 4 3 5-7"/></svg>
+        <span class="tab-lbl">History</span>
+      </button>
+      <button data-screen="exercises" type="button">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="2" y1="12" x2="22" y2="12"/><rect x="3" y="8.5" width="3" height="7" rx="1"/><rect x="18" y="8.5" width="3" height="7" rx="1"/><rect x="6.5" y="6.5" width="2.4" height="11" rx="1"/><rect x="15.1" y="6.5" width="2.4" height="11" rx="1"/></svg>
+        <span class="tab-lbl">Exercises</span>
+      </button>
+      <button data-screen="sessions" type="button">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="9" x2="9" y2="20"/></svg>
+        <span class="tab-lbl">Sessions</span>
+      </button>
+      <button data-screen="settings" type="button">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+        <span class="tab-lbl">Settings</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- CALL OVERLAY -->
+  <div id="call-overlay" class="call-overlay" hidden role="dialog" aria-label="Coach call">
+    <div class="call-top">
+      <span class="call-name">Coach</span>
+      <span class="call-timer" id="call-timer">00:00</span>
+    </div>
+
+    <div class="call-stage">
+      <div class="orb" id="call-orb">
+        <span class="ring"></span><span class="ring"></span>
+        <svg class="orb-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+      </div>
+      <div class="call-state" id="call-state-label">Connecting…</div>
+    </div>
+
+    <div class="call-captions">
+      <p class="cap-coach" id="cap-coach"></p>
+      <p class="cap-user" id="cap-user"></p>
+    </div>
+
+    <div class="call-controls">
+      <button id="call-mute" class="call-ctrl" type="button" aria-pressed="false" aria-label="Mute">
+        <svg class="ico ico-mic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+        <svg class="ico ico-micoff" viewBox="0 0 24 24" aria-hidden="true"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+        <span class="ctrl-lbl" id="mute-lbl">Mute</span>
+      </button>
+      <button id="call-end" class="call-ctrl end" type="button" aria-label="End call">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+        <span class="ctrl-lbl">End</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- VIDEO MODAL -->
+  <div id="video-modal" class="video-modal" hidden role="dialog" aria-label="Exercise video">
+    <div class="video-sheet">
+      <div class="video-head">
+        <span id="video-title" class="video-title"></span>
+        <button id="video-close" class="icon-ghost dark" type="button" aria-label="Close">✕</button>
+      </div>
+      <div id="video-frame-wrap" class="video-frame-wrap" hidden>
+        <iframe id="video-frame" title="Exercise video" allowfullscreen
+                allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+                referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      </div>
+      <div id="video-empty" class="video-empty">
+        <p class="hint-text">No video pinned for this exercise yet — search YouTube, then pin one so it’s
+          one tap next time.</p>
+        <button id="video-search-btn" class="primary-btn" type="button">Search on YouTube</button>
+        <div class="pin-row">
+          <input id="video-url-input" type="text" inputmode="url" spellcheck="false"
+                 placeholder="Paste a YouTube link to pin it…" />
+          <button id="video-save-btn" class="ghost-btn" type="button">Pin</button>
+        </div>
+      </div>
+      <button id="video-change" class="ghost-btn" type="button" hidden>Pin a different video</button>
+    </div>
+  </div>
+
+  <!-- ADD-EXERCISE PICKER -->
+  <div id="picker-modal" class="sheet-modal" hidden role="dialog" aria-label="Add exercise">
+    <div class="sheet">
+      <div class="sheet-head">
+        <span class="sheet-title">Add exercise</span>
+        <button id="picker-close" class="icon-ghost dark" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="pin-row">
+        <input id="picker-input" type="text" placeholder="Type an exercise name…" spellcheck="false" />
+        <button id="picker-add" class="ghost-btn" type="button">Add</button>
+      </div>
+      <div id="picker-suggestions" class="picker-suggestions"></div>
+    </div>
+  </div>
+
+  <!-- EXERCISE ACTION SHEET (move / copy / remove) -->
+  <div id="sheet-modal" class="sheet-modal" hidden role="dialog" aria-label="Exercise actions">
+    <div class="sheet">
+      <div class="sheet-head">
+        <span id="sheet-title" class="sheet-title"></span>
+        <button id="sheet-close" class="icon-ghost dark" type="button" aria-label="Close">✕</button>
+      </div>
+      <div id="sheet-actions" class="sheet-actions"></div>
+    </div>
+  </div>
+
+  <script src="js/store.js?v=3"></script>
+  <script src="js/speech.js?v=3"></script>
+  <script src="js/api.js?v=3"></script>
+  <script src="js/call.js?v=3"></script>
+  <script src="js/videos.js?v=3"></script>
+  <script src="js/ui.js?v=3"></script>
+  <script src="js/app.js?v=3"></script>
+</body>
+</html>
