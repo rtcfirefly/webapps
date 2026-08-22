@@ -242,6 +242,13 @@ const rand4 = () => Array.from(crypto.getRandomValues(new Uint8Array(4)), b => A
 const viewerId = room => `vd-${room}-v`;
 const cameraId = room => `vd-${room}-c${rand4()}`;
 
+/* Real PeerJS clients wrap payloads with connectionId / type / browser. We had
+ * been sending a bare {sdp}. A broker that validates the shape would explain
+ * both the refusal to relay and the disconnect, and the extra fields cost
+ * nothing, so send what the protocol's own client sends. */
+let connId = 'mc_' + Math.random().toString(36).slice(2, 11);
+const peerPayload = extra => Object.assign({ type: 'media', connectionId: connId, browser: 'Chrome', metadata: null }, extra);
+
 /* ---------------------------------------------------------------- SDP  */
 
 /* Gather ICE fully before sending, so a single blob is enough to connect.
@@ -590,7 +597,7 @@ function newViewerPC(remoteId, cfg) {
   logPC(pc, 'viewer');
   V.peer = remoteId; V.pendingCands = [];
   pc.addEventListener('icecandidate', e => {
-    if (e.candidate && V.sig && remoteId && !pc.__gathered) V.sig.send('CANDIDATE', remoteId, e.candidate.toJSON());
+    if (e.candidate && V.sig && remoteId && !pc.__gathered) V.sig.send('CANDIDATE', remoteId, peerPayload({ candidate: e.candidate.toJSON() }));
   });
   pc.addEventListener('track', e => { if (e.streams[0]) attachRemote(e.streams[0]); });
   pc.addEventListener('connectionstatechange', () => {
@@ -615,7 +622,7 @@ async function handleOffer(m) {
   await waitIce(pc, 2500);
   pc.__gathered = true;
   logSdp('viewer -> local', pc.localDescription);
-  if (V.sig) V.sig.send('ANSWER', m.src, { sdp: sdpJson(pc.localDescription) });
+  if (V.sig) V.sig.send('ANSWER', m.src, peerPayload({ sdp: sdpJson(pc.localDescription) }));
   for (const c of early) { try { await pc.addIceCandidate(c); } catch {} }
 }
 
@@ -671,8 +678,9 @@ async function connectViewerSignal() {
     const m = ev.detail;
     if (m.type === 'OFFER') handleOffer(m).catch(e => { console.warn(e); toast('Negotiation failed: ' + e.message); });
     else if (m.type === 'CANDIDATE') {
-      if (V.pc && V.pc.remoteDescription) V.pc.addIceCandidate(m.payload).catch(() => {});
-      else V.pendingCands.push(m.payload);
+      const c = m.payload.candidate || m.payload;
+      if (V.pc && V.pc.remoteDescription) V.pc.addIceCandidate(c).catch(() => {});
+      else V.pendingCands.push(c);
     }
   });
   sig.addEventListener('down', () => {
@@ -729,7 +737,7 @@ function newCameraPC(dst, cfg) {
   C.pendingCands = [];
   for (const t of C.stream.getTracks()) pc.addTrack(t, C.stream);
   pc.addEventListener('icecandidate', e => {
-    if (e.candidate && C.sig && dst && !pc.__gathered) C.sig.send('CANDIDATE', dst, e.candidate.toJSON());
+    if (e.candidate && C.sig && dst && !pc.__gathered) C.sig.send('CANDIDATE', dst, peerPayload({ candidate: e.candidate.toJSON() }));
   });
   pc.addEventListener('connectionstatechange', () => {
     const s = pc.connectionState;
@@ -753,7 +761,7 @@ async function negotiate() {
   await waitIce(pc, 2500);
   pc.__gathered = true;
   logSdp('camera -> local', pc.localDescription);
-  C.sig.send('OFFER', dst, { sdp: sdpJson(pc.localDescription) });
+  C.sig.send('OFFER', dst, peerPayload({ sdp: sdpJson(pc.localDescription) }));
   setCamState('offer sent\u2026');
 
   clearTimeout(C.answerTimer);
@@ -777,8 +785,9 @@ async function onCamMsg(ev) {
       C.pendingCands = [];
     } catch (e) { console.warn('[vd] answer', e); }
   } else if (m.type === 'CANDIDATE') {
-    if (C.pc && C.pc.remoteDescription) C.pc.addIceCandidate(m.payload).catch(() => {});
-    else C.pendingCands.push(m.payload);
+    const c = m.payload.candidate || m.payload;
+    if (C.pc && C.pc.remoteDescription) C.pc.addIceCandidate(c).catch(() => {});
+    else C.pendingCands.push(c);
   } else if (m.type === 'EXPIRE') {
     setCamState('no viewer with that code', 'bad');
     clearTimeout(C.retry);
@@ -881,48 +890,42 @@ async function brokerSelfTest() {
   $('#dbg').open = true;
   dbg('selftest', '===== broker self-test:', SIGNAL_URL, '=====');
 
-  const idA = 'vdtest-' + rand4() + '-a', idB = 'vdtest-' + rand4() + '-b';
-  const A = new Signal(idA), B = new Signal(idB);
-  const payload = n => ({ sdp: { type: 'offer', sdp: 'x'.repeat(n) } });
-  const waitMsg = (sig, ms) => new Promise(res => {
-    const h = ev => { sig.removeEventListener('msg', h); res(ev.detail); };
-    sig.addEventListener('msg', h);
-    setTimeout(() => { sig.removeEventListener('msg', h); res(null); }, ms);
-  });
-  const waitDown = (sig, ms) => new Promise(res => {
-    sig.addEventListener('down', () => res(true), { once: true });
-    setTimeout(() => res(false), ms);
-  });
+  const sdp = { type: 'offer', sdp: 'v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n' };
 
-  try {
-    await A.open(); await B.open();
-    dbg('selftest', 'both sockets open:', idA, idB);
-
-    A.send('OFFER', idB, payload(200));
-    const relayed = await waitMsg(B, 4000);
-    dbg('selftest', '1. relay A->B (200B) :', relayed ? 'RECEIVED ' + relayed.type : 'NOT RECEIVED');
-
-    const ghost = 'vdtest-' + rand4() + '-ghost';
-    A.send('OFFER', ghost, payload(200));
-    const diedOnGhost = await waitDown(A, 4000);
-    dbg('selftest', '2. send to peer that does not exist :',
-      diedOnGhost ? 'SOCKET CLOSED  <-- explains the camera drop' : 'socket survived');
-
-    if (!diedOnGhost) {
-      A.send('OFFER', idB, payload(8000));
-      const big = await Promise.race([
-        waitMsg(B, 4000).then(m => m ? 'RECEIVED' : 'not received'),
-        waitDown(A, 4000).then(d => d ? 'SOCKET CLOSED' : null),
-      ]);
-      dbg('selftest', '3. 8KB message :', big || 'not received');
-    } else {
-      dbg('selftest', '3. 8KB message : skipped, socket already gone');
+  /* Each probe gets its own pair of sockets: the first probe killing its
+   * sender must not make later probes report nonsense, which is exactly what
+   * the first version of this did. */
+  async function probe(label, type, payload) {
+    const A = new Signal('vdtest-' + rand4() + '-a'), B = new Signal('vdtest-' + rand4() + '-b');
+    let verdict;
+    try {
+      await A.open(); await B.open();
+      const got = new Promise(res => {
+        const h = ev => { B.removeEventListener('msg', h); res(ev.detail); };
+        B.addEventListener('msg', h);
+        setTimeout(() => { B.removeEventListener('msg', h); res(null); }, 3500);
+      });
+      const died = new Promise(res => {
+        A.addEventListener('down', () => res(true), { once: true });
+        setTimeout(() => res(false), 3500);
+      });
+      A.send(type, B.id, payload);
+      const [msg, senderDied] = await Promise.all([got, died]);
+      verdict = (msg ? 'RELAYED' : 'not relayed') + (senderDied ? ' + SENDER DISCONNECTED' : ' + sender alive');
+    } catch (e) {
+      verdict = 'could not open sockets: ' + e.message;
     }
-  } catch (e) {
-    dbg('selftest', 'FAILED:', e.message, '- the broker is unreachable from here');
+    A.close(); B.close();
+    dbg('selftest', label.padEnd(34), verdict);
+    return verdict;
   }
-  A.close(); B.close();
-  dbg('selftest', '===== done =====');
+
+  await probe('OFFER, PeerJS payload shape', 'OFFER', peerPayload({ sdp }));
+  await probe('OFFER, bare {sdp}', 'OFFER', { sdp });
+  await probe('CANDIDATE, PeerJS shape', 'CANDIDATE', peerPayload({ candidate: { candidate: '', sdpMid: '0' } }));
+  await probe('HEARTBEAT (control message)', 'HEARTBEAT', null);
+
+  dbg('selftest', '===== done. "not relayed + SENDER DISCONNECTED" on every row means the broker is refusing to relay at all =====');
   toast('Self-test finished — read the debug log');
   btn.disabled = false; btn.textContent = 'Test the broker';
 }
