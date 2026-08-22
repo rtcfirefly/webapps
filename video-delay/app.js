@@ -311,25 +311,30 @@ const forTransmit = sdp => sdp.split('\n').filter(l => !/^a=candidate:\S+ \d+ tc
 const KEEP_BEHIND = 40;   // seconds of already-played video kept for replay
 const TARGET_LEAD = 0.35; // seconds the playhead sits behind the buffer edge
 
-const D = {
-  video: null, stream: null,
-  rec: null, ms: null, sb: null, mime: '',
-  queue: [],      // {t, buf} — waiting out the delay
-  pending: [],    // ArrayBuffers ready to append
-  delayMs: 30000,
-  live: true,     // false while the user is scrubbing back through the buffer
-  frozen: false,
-  timer: 0,
-  lastAppend: 0,
-  everDecoded: false,
-  wantEdge: false,
-  lastCapture: 0,
-  lastSeek: 0,
-  lastTime: -1,
-  lastMove: 0,
-  firstRelease: 0,
-  bypass: false,  // true if we gave up and fell back to undelayed playback
-};
+/* Two feeds run identical, independent pipelines: the phone (the main panes)
+ * and the PC's own webcam (the self-view tiles). Everything below takes the
+ * line it operates on, so nothing is shared but the delay setting. */
+function makeLine(name, bitrate) {
+  return {
+    name, bitrate,
+    video: null, stream: null,
+    rec: null, ms: null, sb: null, mime: '', objUrl: '', onDecoded: null,
+    queue: [],      // {t, buf} — waiting out the delay
+    pending: [],    // ArrayBuffers ready to append
+    delayMs: 30000,
+    live: true,     // false while the user is scrubbing back through the buffer
+    frozen: false,
+    timer: 0, restart: 0, lastLog: 0,
+    lastAppend: 0, everDecoded: false, wantEdge: false,
+    lastCapture: 0, lastSeek: 0, lastTime: -1, lastMove: 0,
+    firstRelease: 0,
+    bypass: false,  // true if we gave up and fell back to undelayed playback
+  };
+}
+
+const D = makeLine('phone', 3_000_000);
+const W = makeLine('webcam', 1_200_000);   // a small tile: no need for 3 Mb/s
+const LINES = [D, W];
 
 function pickMime(hasAudio) {
   const list = [];
@@ -341,119 +346,118 @@ function pickMime(hasAudio) {
   return list.find(t => MediaRecorder.isTypeSupported(t) && MSImpl.isTypeSupported(t)) || null;
 }
 
-function stopDelay() {
-  clearInterval(D.timer); D.timer = 0;
-  clearTimeout(setDelay._restart);
-  clearTimeout(attachRemote.t);
-  if (D.video && D.onDecoded) {
-    D.video.removeEventListener('loadeddata', D.onDecoded);
-    D.video.removeEventListener('playing', D.onDecoded);
+function stopDelay(d) {
+  clearInterval(d.timer); d.timer = 0;
+  clearTimeout(d.restart);
+  if (d === D) clearTimeout(attachRemote.t);
+  if (d.video && d.onDecoded) {
+    d.video.removeEventListener('loadeddata', d.onDecoded);
+    d.video.removeEventListener('playing', d.onDecoded);
   }
-  if (D.objUrl) { try { URL.revokeObjectURL(D.objUrl); } catch {} D.objUrl = ''; }
-  try { D.rec && D.rec.state !== 'inactive' && D.rec.stop(); } catch {}
-  try { D.ms && D.ms.readyState === 'open' && D.ms.endOfStream(); } catch {}
-  if (D.video) { D.video.removeAttribute('src'); D.video.srcObject = null; try { D.video.load(); } catch {} }
-  D.rec = D.ms = D.sb = null; D.queue = []; D.pending = [];
-  D.live = true; D.frozen = false; D.bypass = false; D.firstRelease = 0; D.everDecoded = false;
-  D.lastAppend = 0; D.lastSeek = 0; D.lastTime = -1; D.lastMove = 0;
-  D.wantEdge = false; D.lastCapture = 0;
+  if (d.objUrl) { try { URL.revokeObjectURL(d.objUrl); } catch {} d.objUrl = ''; }
+  try { d.rec && d.rec.state !== 'inactive' && d.rec.stop(); } catch {}
+  try { d.ms && d.ms.readyState === 'open' && d.ms.endOfStream(); } catch {}
+  if (d.video) { d.video.removeAttribute('src'); d.video.srcObject = null; try { d.video.load(); } catch {} }
+  d.rec = d.ms = d.sb = null; d.queue = []; d.pending = [];
+  d.live = true; d.frozen = false; d.bypass = false; d.firstRelease = 0; d.everDecoded = false;
+  d.lastAppend = 0; d.lastSeek = 0; d.lastTime = -1; d.lastMove = 0;
+  d.wantEdge = false; d.lastCapture = 0;
 }
 
-function bypassToLive(why) {
-  if (D.bypass) return;
-  dbg('delay', 'BYPASS to live video:', why);
-  D.bypass = true;
-  clearInterval(D.timer); D.timer = 0;
+function bypassToLive(d, why) {
+  if (d.bypass) return;
+  dbg(d.name, 'BYPASS to live video:', why);
+  d.bypass = true;
+  clearInterval(d.timer); d.timer = 0;
   setDelayTag();
-  try { D.rec && D.rec.state !== 'inactive' && D.rec.stop(); } catch {}
-  D.video.removeAttribute('src');
-  D.video.srcObject = D.stream;
-  D.video.play().catch(() => {});
-  toast('Delay buffer unavailable (' + why + ') — showing live video');
+  try { d.rec && d.rec.state !== 'inactive' && d.rec.stop(); } catch {}
+  d.video.removeAttribute('src');
+  d.video.srcObject = d.stream;
+  d.video.play().catch(() => {});
+  toast(d.name + ': delay buffer unavailable (' + why + ') — showing live video');
 }
 
-function startDelay(stream, video) {
-  stopDelay();
-  D.stream = stream; D.video = video;
+function startDelay(d, stream, video) {
+  stopDelay(d);
+  d.stream = stream; d.video = video;
 
-  dbg('delay', 'remote stream: video=' + stream.getVideoTracks().length, 'audio=' + stream.getAudioTracks().length);
+  dbg(d.name, 'stream: video=' + stream.getVideoTracks().length, 'audio=' + stream.getAudioTracks().length);
   const mime = pickMime(stream.getAudioTracks().length > 0);
-  dbg('delay', 'chosen mime =', mime || '(none)');
-  if (!mime) { bypassToLive('no MediaRecorder/MediaSource codec in common'); return; }
-  D.mime = mime;
+  dbg(d.name, 'chosen mime =', mime || '(none)');
+  if (!mime) { bypassToLive(d, 'no MediaRecorder/MediaSource codec in common'); return; }
+  d.mime = mime;
 
   let rec;
-  try { rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 3_000_000 }); }
-  catch (e) { bypassToLive('MediaRecorder: ' + e.name); return; }
-  D.rec = rec;
+  try { rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: d.bitrate }); }
+  catch (e) { bypassToLive(d, 'MediaRecorder: ' + e.name); return; }
+  d.rec = rec;
 
   rec.ondataavailable = (e) => {
     if (!e.data || !e.data.size) return;
     // Keep queue order stable: reserve the slot now, fill it when the
     // Blob resolves. A chunk is only released once its bytes are in.
     const slot = { t: now(), buf: null };
-    D.queue.push(slot);
+    d.queue.push(slot);
     e.data.arrayBuffer().then(b => { slot.buf = b; }, () => { slot.buf = new ArrayBuffer(0); });
   };
-  rec.onerror = (e) => bypassToLive('recorder error' + (e.error ? ': ' + e.error.name : ''));
+  rec.onerror = (e) => bypassToLive(d, 'recorder error' + (e.error ? ': ' + e.error.name : ''));
   rec.start(200);
 
   const ms = new MSImpl();
-  D.ms = ms;
+  d.ms = ms;
   if (window.ManagedMediaSource && ms instanceof window.ManagedMediaSource) {
     video.disableRemotePlayback = true;
     video.srcObject = ms;
   } else {
-    D.objUrl = URL.createObjectURL(ms);
-    video.src = D.objUrl;
+    d.objUrl = URL.createObjectURL(ms);
+    video.src = d.objUrl;
   }
 
   // Bound once and removed in stopDelay: re-added per start, these leaked a
   // pair on every reconnect and every bypass-recovery restart.
-  D.onDecoded = (ev) => {
-    if (!D.everDecoded) { D.everDecoded = true; dbg('delay', 'first decode (' + ev.type + ') - startup watchdog disarmed'); }
+  d.onDecoded = (ev) => {
+    if (!d.everDecoded) { d.everDecoded = true; dbg(d.name, 'first decode (' + ev.type + ') - startup watchdog disarmed'); }
   };
-  video.addEventListener('loadeddata', D.onDecoded);
-  video.addEventListener('playing', D.onDecoded);
+  video.addEventListener('loadeddata', d.onDecoded);
+  video.addEventListener('playing', d.onDecoded);
 
   ms.addEventListener('sourceopen', () => {
     let sb;
     try { sb = ms.addSourceBuffer(rec.mimeType || mime); }
-    catch (e) { bypassToLive('addSourceBuffer: ' + e.name); return; }
-    dbg('delay', 'sourceopen, SourceBuffer for', rec.mimeType || mime);
-    try { sb.mode = 'sequence'; } catch (e) { dbg('delay', 'sb.mode=sequence rejected', e); }
-    sb.addEventListener('updateend', () => { step(); maintain(); });
-    sb.addEventListener('error', () => bypassToLive('source buffer error'));
-    D.sb = sb;
-    step();
+    catch (e) { bypassToLive(d, 'addSourceBuffer: ' + e.name); return; }
+    dbg(d.name, 'sourceopen, SourceBuffer for', rec.mimeType || mime);
+    try { sb.mode = 'sequence'; } catch (e) { dbg(d.name, 'sb.mode=sequence rejected', e); }
+    sb.addEventListener('updateend', () => { step(d); maintain(d); });
+    sb.addEventListener('error', () => bypassToLive(d, 'source buffer error'));
+    d.sb = sb;
+    step(d);
   }, { once: true });
 
-  D.timer = setInterval(pump, 100);
+  d.timer = setInterval(() => pump(d), 100);
 }
 
-function pump() {
+function pump(d) {
   const t = now();
-  while (D.queue.length && D.queue[0].buf && (t - D.queue[0].t) >= D.delayMs) {
-    const c = D.queue.shift();
-    if (c.buf.byteLength) { D.pending.push(c.buf); D.lastCapture = c.t; }
-    if (!D.firstRelease) D.firstRelease = t;
+  while (d.queue.length && d.queue[0].buf && (t - d.queue[0].t) >= d.delayMs) {
+    const c = d.queue.shift();
+    if (c.buf.byteLength) { d.pending.push(c.buf); d.lastCapture = c.t; }
+    if (!d.firstRelease) d.firstRelease = t;
   }
-  step();
-  maintain();
-  updateOverlay();
-  updateHud();
+  step(d);
+  maintain(d);
+  if (d === D) { updateOverlay(); updateHud(); }
+  setDelayTag();
 
-  if (t - (pump.last || 0) > 5000) {
-    pump.last = t;
-    const v = D.video, sb = D.sb;
+  if (t - d.lastLog > 5000) {
+    d.lastLog = t;
+    const v = d.video, sb = d.sb;
     const b = sb && sb.buffered.length
       ? sb.buffered.start(0).toFixed(1) + '-' + sb.buffered.end(sb.buffered.length - 1).toFixed(1) : 'none';
-    dbg('delay', 'queue=' + D.queue.length, 'pending=' + D.pending.length, 'buffered=' + b,
+    dbg(d.name, 'queue=' + d.queue.length, 'pending=' + d.pending.length, 'buffered=' + b,
       't=' + (v ? v.currentTime.toFixed(1) : '?'), 'rs=' + (v ? v.readyState : '?'),
-      'paused=' + (v ? v.paused : '?'), 'set=' + (D.delayMs / 1000) + 's',
-      'live=' + D.live, 'frozen=' + D.frozen,
-      'sinceAppend=' + (D.lastAppend ? Math.round(t - D.lastAppend) + 'ms' : '-'),
-      'overlay=' + ($('#overlay').hidden ? 'hidden' : 'SHOWN'));
+      'paused=' + (v ? v.paused : '?'), 'set=' + (d.delayMs / 1000) + 's',
+      'live=' + d.live, 'frozen=' + d.frozen,
+      'sinceAppend=' + (d.lastAppend ? Math.round(t - d.lastAppend) + 'ms' : '-'));
   }
 
   // Startup watchdog: if the recorder/MSE codec pairing turns out to be lying,
@@ -463,19 +467,18 @@ function pump() {
   // once and never reset, so without the everDecoded guard the test decayed
   // into a bare "readyState < 2" that stayed armed for the whole session --
   // and raising the delay deliberately starves the buffer, which is precisely
-  // the condition that drops readyState. Raising the delay from 0 therefore
-  // bypassed straight to live and made every delay control inert, which is
-  // exactly the reported bug. Starving on purpose is not a codec failure.
-  if (D.video && D.video.readyState >= 2) D.everDecoded = true;
-  const withholding = D.queue.length > 0 && (t - D.queue[0].t) < D.delayMs;
-  if (D.firstRelease && !D.bypass && !D.everDecoded && !withholding &&
-      t - D.firstRelease > 6000 && D.video.readyState < 2) {
-    bypassToLive('nothing decodable in the first 6s');
+  // the condition that drops readyState. Starving on purpose is not a codec
+  // failure.
+  if (d.video && d.video.readyState >= 2) d.everDecoded = true;
+  const withholding = d.queue.length > 0 && (t - d.queue[0].t) < d.delayMs;
+  if (d.firstRelease && !d.bypass && !d.everDecoded && !withholding &&
+      t - d.firstRelease > 6000 && d.video.readyState < 2) {
+    bypassToLive(d, 'nothing decodable in the first 6s');
   }
 }
 
-function step() {
-  const { sb, ms, video } = D;
+function step(d) {
+  const { sb, ms, video } = d;
   if (!sb || !ms || ms.readyState !== 'open' || sb.updating) return;
 
   // Drop what has already been played, well behind the replay window.
@@ -485,45 +488,45 @@ function step() {
     if (keep - s0 > 5) { try { sb.remove(s0, keep); return; } catch {} }
   }
 
-  if (!D.pending.length) return;
-  const buf = D.pending.shift();
+  if (!d.pending.length) return;
+  const buf = d.pending.shift();
   try {
     sb.appendBuffer(buf);
-    D.lastAppend = now();
+    d.lastAppend = now();
   } catch (e) {
     if (e && e.name === 'QuotaExceededError') {
-      D.pending.unshift(buf);
+      d.pending.unshift(buf);
       try {
         // remove(start, end) with end <= start throws InvalidAccessError, which
         // left the quota unrelieved and the same buffer retried forever.
         if (sb.buffered.length) {
           const s0 = sb.buffered.start(0), to = video.currentTime - 5;
           if (to > s0) sb.remove(s0, to);
-          else dbg('delay', 'quota hit but nothing safe to evict', s0.toFixed(1), to.toFixed(1));
+          else dbg(d.name, 'quota hit but nothing safe to evict', s0.toFixed(1), to.toFixed(1));
         }
-      } catch (e) { dbg('delay', 'quota eviction failed', e); }
+      } catch (err) { dbg(d.name, 'quota eviction failed', err); }
     } else {
-      dbg('delay', 'appendBuffer failed', e);
+      dbg(d.name, 'appendBuffer failed', e);
     }
   }
 }
 
-function seekToEdge() {
-  const { sb, video } = D;
+function seekToEdge(d) {
+  const { sb, video } = d;
   if (!sb || !video || !sb.buffered.length) return;
   const start = sb.buffered.start(0), end = sb.buffered.end(sb.buffered.length - 1);
   video.currentTime = Math.max(start + 0.05, end - TARGET_LEAD);
-  D.lastSeek = now();
+  d.lastSeek = now();
   video.play().catch(() => {});
 }
 
-function maintain() {
-  const { sb, video } = D;
+function maintain(d) {
+  const { sb, video } = d;
   if (!sb || !sb.buffered.length) return;
   const start = sb.buffered.start(0);
   const end = sb.buffered.end(sb.buffered.length - 1);
 
-  if (D.frozen) return;
+  if (d.frozen) return;
   if (video.currentTime < start) video.currentTime = start + 0.05;
 
   const lead = end - video.currentTime;
@@ -533,16 +536,55 @@ function maintain() {
   // A shortened delay must always take effect, even by 1s: that releases only
   // ~1s of backlog, leaving a lead below the 2.5s snap threshold, so without
   // the explicit flag the change was silently absorbed.
-  const drained = !D.pending.length && !D.sb.updating;
-  if (D.wantEdge && drained) { D.wantEdge = false; seekToEdge(); }
-  else if (D.live && lead > 2.5 && drained && now() - D.lastSeek > 400) {
-    dbg('delay', 'seek to live edge: lead was', lead.toFixed(2) + 's');
-    seekToEdge();
+  const drained = !d.pending.length && !sb.updating;
+  if (d.wantEdge && drained) { d.wantEdge = false; seekToEdge(d); }
+  else if (d.live && lead > 2.5 && drained && now() - d.lastSeek > 400) {
+    dbg(d.name, 'seek to live edge: lead was', lead.toFixed(2) + 's');
+    seekToEdge(d);
   }
   // Scrubbed back and left there: don't let the buffer run away.
-  if (!D.live && lead > KEEP_BEHIND + 60) { D.live = true; setLiveBtn(); }
+  if (!d.live && lead > KEEP_BEHIND + 60) { d.live = true; if (d === D) setLiveBtn(); }
 
   if (video.paused && end - video.currentTime > 0.15) video.play().catch(() => {});
+}
+
+/* ------------------------------------------------- the PC's own webcam  */
+
+const CAM = { stream: null, on: false };
+
+async function toggleWebcam(want) {
+  const on = want === undefined ? !CAM.on : want;
+  if (!on) {
+    stopDelay(W);
+    if (CAM.stream) CAM.stream.getTracks().forEach(t => t.stop());
+    CAM.stream = null; CAM.on = false;
+    $('#selfLive').srcObject = null;
+    $('#selfview').hidden = true;
+    $('#btnSelf').classList.remove('on');
+    store.set('webcam', false);
+    dbg('webcam', 'off');
+    return;
+  }
+  try {
+    // No audio: this is a silent self-view sitting next to speakers, and a
+    // second microphone in the room is a feedback loop waiting to happen.
+    CAM.stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 24 } },
+      audio: false,
+    });
+  } catch (e) {
+    dbg('webcam', 'getUserMedia failed', e);
+    toast('No webcam available: ' + e.name);
+    return;
+  }
+  CAM.on = true;
+  $('#selfview').hidden = false;
+  $('#btnSelf').classList.add('on');
+  $('#selfLive').srcObject = CAM.stream;
+  $('#selfLive').play().catch(() => {});
+  startDelay(W, CAM.stream, $('#selfDelay'));
+  store.set('webcam', true);
+  dbg('webcam', 'on, tracks:', CAM.stream.getVideoTracks().map(t => JSON.stringify(t.getSettings())).join(' '));
 }
 
 /* ============================== VIEWER UI ============================== */
@@ -564,16 +606,20 @@ function setDelay(sec, persist = true) {
   sec = clamp(Math.round(sec) || 0, 0, 600);
   const changed = D.delayMs !== sec * 1000;
   if (changed) dbg('delay', 'set to', sec + 's');
-  if (changed && sec * 1000 < D.delayMs && D.live) D.wantEdge = true;
-  D.delayMs = sec * 1000;
-  // Bypass used to be terminal: once it fired, only a reload brought the delay
-  // back. Touching the delay is an unambiguous request for a delayed picture,
-  // so take it as a cue to rebuild the pipeline.
-  if (changed && D.bypass && D.stream && D.video) {
-    dbg('delay', 'delay changed while bypassed - restarting the pipeline');
-    const s = D.stream, v = D.video;
-    clearTimeout(setDelay._restart);
-    setDelay._restart = setTimeout(() => startDelay(s, v), 250);
+  // One delay for both feeds: the point of the self-view is to sit beside the
+  // phone's delayed picture at the same offset.
+  for (const d of LINES) {
+    if (changed && sec * 1000 < d.delayMs && d.live) d.wantEdge = true;
+    d.delayMs = sec * 1000;
+    // Bypass used to be terminal: once it fired, only a reload brought the
+    // delay back. Touching the delay is an unambiguous request for a delayed
+    // picture, so take it as a cue to rebuild the pipeline.
+    if (changed && d.bypass && d.stream && d.video) {
+      dbg(d.name, 'delay changed while bypassed - restarting the pipeline');
+      const s = d.stream, v = d.video, line = d;
+      clearTimeout(d.restart);
+      d.restart = setTimeout(() => startDelay(line, s, v), 250);
+    }
   }
   $('#delay').value = sec;
   $('#delayNum').value = sec;
@@ -604,6 +650,7 @@ function setLayout(l) {
 function setDelayTag() {
   const s = Math.round(D.delayMs / 1000);
   $('#delayTag').textContent = D.bypass ? 'live (no delay)' : (s ? s + 's delay' : 'no delay');
+  $('#selfTag').textContent = W.bypass ? 'you \u00b7 live' : 'you \u00b7 ' + s + 's';
   $('#fsVal').textContent = s + 's';
 }
 
@@ -692,7 +739,7 @@ function attachRemote(stream) {
   clearTimeout(attachRemote.t);
   attachRemote.t = setTimeout(() => {
     dbg('delay', 'starting pipeline, tracks:', stream.getTracks().map(t => t.kind).join('+') || 'none');
-    startDelay(stream, $('#v'));
+    startDelay(D, stream, $('#v'));
     clearInterval(V.statsTimer);
     V.statsTimer = setInterval(pollStats, 1000);
   }, 300);
@@ -775,6 +822,7 @@ async function startViewer() {
   // session across that. What a reload CAN do is come back ready to re-pair,
   // so if the last pairing was manual, put the QR on screen immediately --
   // recovery is then one scan rather than a hunt through the panels.
+  if (store.get('webcam', false)) toggleWebcam(true);
   if (store.get('paired', '') === 'manual') {
     $('#vManual').open = true;
     dbg('viewer', 'last pairing was manual - regenerating the QR for a quick re-pair');
@@ -1280,7 +1328,7 @@ function wire() {
   $('#goViewer').onclick = () => { location.hash = '#v'; startViewer(); };
   $('#goCamera').onclick = () => { show('camera'); $('#codeIn').focus(); };
   for (const b of document.querySelectorAll('[data-back]')) {
-    b.onclick = () => { stopDelay(); stopCamera(); stopScan(); if (V.sig) V.sig.close(); if (V.pc) try { V.pc.close(); } catch {}
+    b.onclick = () => { for (const d of LINES) stopDelay(d); toggleWebcam(false); stopCamera(); stopScan(); if (V.sig) V.sig.close(); if (V.pc) try { V.pc.close(); } catch {}
       V.pc = null; V.sig = null; clearInterval(V.statsTimer); location.hash = ''; show('home'); };
   }
 
@@ -1298,15 +1346,21 @@ function wire() {
   // maintain()'s snap only fires past a 2.5s lead, so pressing Live while
   // 1-2s behind used to toggle the button and move nothing.
   $('#btnLive').onclick = () => {
-    D.live = true; D.frozen = false;
     $('#btnFreeze').classList.remove('on');
-    setLiveBtn(); seekToEdge(); maintain();
+    for (const d of LINES) { d.live = true; d.frozen = false; seekToEdge(d); maintain(d); }
+    setLiveBtn();
   };
   $('#btnBack').onclick = () => jump(-10);
   $('#btnFreeze').onclick = () => {
-    D.frozen = !D.frozen;
-    $('#btnFreeze').classList.toggle('on', D.frozen);
-    if (D.frozen) D.video && D.video.pause(); else { D.live = false; setLiveBtn(); D.video && D.video.play().catch(() => {}); }
+    const frozen = !D.frozen;
+    $('#btnFreeze').classList.toggle('on', frozen);
+    for (const d of LINES) {
+      d.frozen = frozen;
+      if (!d.video) continue;
+      if (frozen) d.video.pause();
+      else { d.live = false; d.video.play().catch(() => {}); }
+    }
+    setLiveBtn();
   };
   $('#btnMirror').onclick = () => {
     const on = $('#stage').classList.toggle('mirror');
@@ -1338,6 +1392,7 @@ function wire() {
     else $('#stage').requestFullscreen().catch(() => {});
   };
 
+  $('#btnSelf').onclick = () => toggleWebcam();
   if (store.get('mirror', false)) $('#btnMirror').click();
 
   /* --- pairing --- */
@@ -1413,6 +1468,7 @@ function wire() {
     else if (k === 'f') $('#btnFs').click();
     else if (k === 'm') $('#btnMirror').click();
     else if (k === 'p') $('#btnLayout').click();
+    else if (k === 'c') $('#btnSelf').click();
     else if (k === 'u') $('#btnMute').click();
     else if (k === 'l') $('#btnLive').click();
     else if (e.key === 'ArrowLeft') { e.preventDefault(); jump(e.shiftKey ? -30 : -5); }
@@ -1432,15 +1488,21 @@ function wire() {
 }
 
 function jump(sec) {
-  const { sb, video } = D;
-  if (!sb || !sb.buffered.length || D.bypass) return;
-  const start = sb.buffered.start(0), end = sb.buffered.end(sb.buffered.length - 1);
-  const t = clamp(video.currentTime + sec, start + 0.05, end - 0.05);
-  video.currentTime = t;
-  D.live = (end - t) < 1;
-  D.frozen = false; $('#btnFreeze').classList.remove('on');
+  $('#btnFreeze').classList.remove('on');
+  for (const d of LINES) {
+    const { sb, video } = d;
+    if (!sb || !sb.buffered.length || d.bypass) continue;
+    const start = sb.buffered.start(0), end = sb.buffered.end(sb.buffered.length - 1);
+    // clamp() inverts when the buffered range is shorter than the guard band,
+    // so widen rather than let the low bound lose to the high one.
+    const lo = start + 0.05, hi = Math.max(lo, end - 0.05);
+    const t = clamp(video.currentTime + sec, lo, hi);
+    video.currentTime = t;
+    d.live = (end - t) < 1;
+    d.frozen = false;
+    video.play().catch(() => {});
+  }
   setLiveBtn();
-  video.play().catch(() => {});
 }
 
 function route() {
