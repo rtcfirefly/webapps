@@ -322,6 +322,8 @@ const D = {
   timer: 0,
   lastAppend: 0,
   everDecoded: false,
+  wantEdge: false,
+  lastCapture: 0,
   lastSeek: 0,
   lastTime: -1,
   lastMove: 0,
@@ -341,12 +343,20 @@ function pickMime(hasAudio) {
 
 function stopDelay() {
   clearInterval(D.timer); D.timer = 0;
+  clearTimeout(setDelay._restart);
+  clearTimeout(attachRemote.t);
+  if (D.video && D.onDecoded) {
+    D.video.removeEventListener('loadeddata', D.onDecoded);
+    D.video.removeEventListener('playing', D.onDecoded);
+  }
+  if (D.objUrl) { try { URL.revokeObjectURL(D.objUrl); } catch {} D.objUrl = ''; }
   try { D.rec && D.rec.state !== 'inactive' && D.rec.stop(); } catch {}
   try { D.ms && D.ms.readyState === 'open' && D.ms.endOfStream(); } catch {}
   if (D.video) { D.video.removeAttribute('src'); D.video.srcObject = null; try { D.video.load(); } catch {} }
   D.rec = D.ms = D.sb = null; D.queue = []; D.pending = [];
   D.live = true; D.frozen = false; D.bypass = false; D.firstRelease = 0; D.everDecoded = false;
   D.lastAppend = 0; D.lastSeek = 0; D.lastTime = -1; D.lastMove = 0;
+  D.wantEdge = false; D.lastCapture = 0;
 }
 
 function bypassToLive(why) {
@@ -394,14 +404,17 @@ function startDelay(stream, video) {
     video.disableRemotePlayback = true;
     video.srcObject = ms;
   } else {
-    video.src = URL.createObjectURL(ms);
+    D.objUrl = URL.createObjectURL(ms);
+    video.src = D.objUrl;
   }
 
-  for (const ev of ['loadeddata', 'playing']) {
-    video.addEventListener(ev, () => {
-      if (!D.everDecoded) { D.everDecoded = true; dbg('delay', 'first decode (' + ev + ') - startup watchdog disarmed'); }
-    });
-  }
+  // Bound once and removed in stopDelay: re-added per start, these leaked a
+  // pair on every reconnect and every bypass-recovery restart.
+  D.onDecoded = (ev) => {
+    if (!D.everDecoded) { D.everDecoded = true; dbg('delay', 'first decode (' + ev.type + ') - startup watchdog disarmed'); }
+  };
+  video.addEventListener('loadeddata', D.onDecoded);
+  video.addEventListener('playing', D.onDecoded);
 
   ms.addEventListener('sourceopen', () => {
     let sb;
@@ -422,7 +435,7 @@ function pump() {
   const t = now();
   while (D.queue.length && D.queue[0].buf && (t - D.queue[0].t) >= D.delayMs) {
     const c = D.queue.shift();
-    if (c.buf.byteLength) D.pending.push(c.buf);
+    if (c.buf.byteLength) { D.pending.push(c.buf); D.lastCapture = c.t; }
     if (!D.firstRelease) D.firstRelease = t;
   }
   step();
@@ -481,12 +494,27 @@ function step() {
     if (e && e.name === 'QuotaExceededError') {
       D.pending.unshift(buf);
       try {
-        if (sb.buffered.length) sb.remove(sb.buffered.start(0), Math.max(0.1, video.currentTime - 5));
-      } catch {}
+        // remove(start, end) with end <= start throws InvalidAccessError, which
+        // left the quota unrelieved and the same buffer retried forever.
+        if (sb.buffered.length) {
+          const s0 = sb.buffered.start(0), to = video.currentTime - 5;
+          if (to > s0) sb.remove(s0, to);
+          else dbg('delay', 'quota hit but nothing safe to evict', s0.toFixed(1), to.toFixed(1));
+        }
+      } catch (e) { dbg('delay', 'quota eviction failed', e); }
     } else {
       dbg('delay', 'appendBuffer failed', e);
     }
   }
+}
+
+function seekToEdge() {
+  const { sb, video } = D;
+  if (!sb || !video || !sb.buffered.length) return;
+  const start = sb.buffered.start(0), end = sb.buffered.end(sb.buffered.length - 1);
+  video.currentTime = Math.max(start + 0.05, end - TARGET_LEAD);
+  D.lastSeek = now();
+  video.play().catch(() => {});
 }
 
 function maintain() {
@@ -502,10 +530,14 @@ function maintain() {
   // Re-seek only once the burst of appends a delay change produces has fully
   // drained, and at most every 400 ms. Seeking on every updateend pins
   // readyState below HAVE_CURRENT_DATA and the picture never comes back.
-  if (D.live && lead > 2.5 && !D.pending.length && !D.sb.updating && now() - D.lastSeek > 400) {
-    D.lastSeek = now();
+  // A shortened delay must always take effect, even by 1s: that releases only
+  // ~1s of backlog, leaving a lead below the 2.5s snap threshold, so without
+  // the explicit flag the change was silently absorbed.
+  const drained = !D.pending.length && !D.sb.updating;
+  if (D.wantEdge && drained) { D.wantEdge = false; seekToEdge(); }
+  else if (D.live && lead > 2.5 && drained && now() - D.lastSeek > 400) {
     dbg('delay', 'seek to live edge: lead was', lead.toFixed(2) + 's');
-    video.currentTime = Math.max(start + 0.05, end - TARGET_LEAD);
+    seekToEdge();
   }
   // Scrubbed back and left there: don't let the buffer run away.
   if (!D.live && lead > KEEP_BEHIND + 60) { D.live = true; setLiveBtn(); }
@@ -532,6 +564,7 @@ function setDelay(sec, persist = true) {
   sec = clamp(Math.round(sec) || 0, 0, 600);
   const changed = D.delayMs !== sec * 1000;
   if (changed) dbg('delay', 'set to', sec + 's');
+  if (changed && sec * 1000 < D.delayMs && D.live) D.wantEdge = true;
   D.delayMs = sec * 1000;
   // Bypass used to be terminal: once it fired, only a reload brought the delay
   // back. Touching the delay is an unambiguous request for a delayed picture,
@@ -542,7 +575,7 @@ function setDelay(sec, persist = true) {
     clearTimeout(setDelay._restart);
     setDelay._restart = setTimeout(() => startDelay(s, v), 250);
   }
-  $('#delay').value = clamp(sec, 0, 180);
+  $('#delay').value = sec;
   $('#delayNum').value = sec;
   setDelayTag();
   if (persist) store.set('delay', sec);
@@ -633,9 +666,16 @@ function updateHud() {
   if (!D.bypass && D.sb && D.sb.buffered.length && video) {
     const end = D.sb.buffered.end(D.sb.buffered.length - 1);
     const start = D.sb.buffered.start(0);
-    const actual = D.delayMs / 1000 + Math.max(0, end - video.currentTime);
-    bits.push('delay ' + actual.toFixed(1) + 's');
+    // Measured, not the setting: during a delay raise nothing is being
+    // released, so this correctly grows with the frozen picture instead of
+    // claiming the new delay is already in force.
+    const atEdge = D.lastCapture ? (now() - D.lastCapture) / 1000 : D.delayMs / 1000;
+    bits.push('delay ' + (atEdge + Math.max(0, end - video.currentTime)).toFixed(1) + 's');
     bits.push('buf ' + (end - start).toFixed(0) + 's');
+    if (D.queue.length) {
+      const mb = D.queue.reduce((n, c) => n + (c.buf ? c.buf.byteLength : 0), 0) / 1048576;
+      if (mb >= 1) bits.push('queued ' + mb.toFixed(0) + ' MB');
+    }
     if (!D.live) bits.push('replay −' + (end - video.currentTime).toFixed(1) + 's');
   }
   if (D.bypass) bits.push('LIVE (no delay)');
@@ -645,9 +685,17 @@ function updateHud() {
 function attachRemote(stream) {
   $('#pip').srcObject = stream;
   $('#pip').play().catch(() => {});
-  startDelay(stream, $('#v'));
-  clearInterval(V.statsTimer);
-  V.statsTimer = setInterval(pollStats, 1000);
+  // One `track` event fires per remote track, so an audio+video call called
+  // this twice for the same stream: the second run tore the pipeline down and
+  // rebuilt it milliseconds in, and the first run's pickMime() had already
+  // decided on a codec from an audio-less stream. Coalesce.
+  clearTimeout(attachRemote.t);
+  attachRemote.t = setTimeout(() => {
+    dbg('delay', 'starting pipeline, tracks:', stream.getTracks().map(t => t.kind).join('+') || 'none');
+    startDelay(stream, $('#v'));
+    clearInterval(V.statsTimer);
+    V.statsTimer = setInterval(pollStats, 1000);
+  }, 300);
 }
 
 let lastBytes = 0, lastStatsAt = 0;
@@ -1247,7 +1295,13 @@ function wire() {
   $('#delay').oninput = e => setDelay(Number(e.target.value));
   $('#delayNum').onchange = e => setDelay(Number(e.target.value));
 
-  $('#btnLive').onclick = () => { D.live = true; D.frozen = false; $('#btnFreeze').classList.remove('on'); setLiveBtn(); maintain(); };
+  // maintain()'s snap only fires past a 2.5s lead, so pressing Live while
+  // 1-2s behind used to toggle the button and move nothing.
+  $('#btnLive').onclick = () => {
+    D.live = true; D.frozen = false;
+    $('#btnFreeze').classList.remove('on');
+    setLiveBtn(); seekToEdge(); maintain();
+  };
   $('#btnBack').onclick = () => jump(-10);
   $('#btnFreeze').onclick = () => {
     D.frozen = !D.frozen;
