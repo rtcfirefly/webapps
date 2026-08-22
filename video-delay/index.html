@@ -69,14 +69,24 @@
   <details class="adv" id="vManual">
     <summary>Pair manually (no signalling server)</summary>
     <div class="row">
-      <label>1 — paste the <b>offer code</b> the phone produced</label>
-      <textarea id="mvIn" spellcheck="false" placeholder="paste here"></textarea>
-      <div class="grp"><button id="mvGo">Make answer</button></div>
+      <label><b>Step 1</b> — point your phone's camera at this</label>
+      <div class="grp"><button id="mvStart">Show pairing QR</button></div>
+      <div id="mvQr" class="qrbox" hidden></div>
+      <div id="mvQrNote" class="pairtxt" hidden></div>
+      <details class="sub"><summary>…or copy the offer code across by hand</summary>
+        <textarea id="mvOffer" spellcheck="false" readonly></textarea>
+        <button id="mvOfferCopy" class="sm">Copy offer code</button>
+      </details>
     </div>
     <div class="row">
-      <label>2 — send this <b>answer code</b> back to the phone</label>
-      <textarea id="mvOut" spellcheck="false" readonly></textarea>
-      <div class="grp"><button id="mvCopy" class="sm">Copy</button></div>
+      <label><b>Step 2</b> — the answer from your phone</label>
+      <div class="grp">
+        <button id="mvScan">📷 Scan the phone's QR</button>
+        <span id="mvScanNote" class="pairtxt"></span>
+      </div>
+      <video id="mvCam" playsinline muted hidden></video>
+      <textarea id="mvIn" spellcheck="false" placeholder="…or paste the answer code here"></textarea>
+      <div class="grp"><button id="mvGo">Connect</button></div>
     </div>
   </details>
 
@@ -131,15 +141,16 @@
 
     <details class="adv" id="cManual" style="margin-top:14px">
       <summary>Pair manually (no signalling server)</summary>
-      <div class="row">
-        <label>1 — make an <b>offer code</b> and get it to the PC</label>
-        <textarea id="mcOut" spellcheck="false" readonly></textarea>
-        <div class="grp"><button id="mcMake">Make offer</button><button id="mcCopy" class="sm">Copy</button></div>
-      </div>
-      <div class="row">
-        <label>2 — paste the <b>answer code</b> from the PC</label>
+      <div class="row" id="mcOfferRow">
+        <label>Paste the PC's <b>offer code</b> (only if you didn't scan its QR)</label>
         <textarea id="mcIn" spellcheck="false" placeholder="paste here"></textarea>
-        <div class="grp"><button id="mcGo">Finish</button></div>
+        <div class="grp"><button id="mcGo">Make answer</button></div>
+      </div>
+      <div class="row" id="mcAnswerRow" hidden>
+        <label><b>Hold this up to the PC's webcam</b>, or copy the code across</label>
+        <div id="mcQr" class="qrbox"></div>
+        <textarea id="mcOut" spellcheck="false" readonly></textarea>
+        <div class="grp"><button id="mcCopy" class="sm">Copy answer code</button></div>
       </div>
     </details>
 
@@ -159,6 +170,7 @@
 </details>
 
 <div id="toast" hidden></div>
+<script src="qr.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

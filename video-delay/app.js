@@ -257,27 +257,47 @@ function waitIce(pc, ms = 4000) {
 }
 const sdpJson = d => ({ type: d.type, sdp: d.sdp });
 
-/* Manual pairing codes: gzip + base64 keeps a full SDP around 700 chars. */
+/* Manual pairing codes. deflate-raw rather than gzip (no 18-byte header and
+ * trailer to pay for), base64url so the code drops straight into a URL
+ * fragment and therefore into a QR. With slimCodecs() upstream this lands a
+ * pairing payload in the high hundreds of chars -- a QR around version 20,
+ * which a phone reads off a monitor without complaint. */
 const B64 = {
-  enc: u8 => { let s = ''; for (const b of u8) s += String.fromCharCode(b); return btoa(s); },
-  dec: s => Uint8Array.from(atob(s), c => c.charCodeAt(0)),
+  enc: u8 => { let s = ''; for (const b of u8) s += String.fromCharCode(b); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); },
+  dec: s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)),
 };
+async function squeeze(bytes, fmt) {
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream(fmt))).arrayBuffer());
+}
+async function expand(bytes, fmt) {
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream(fmt))).arrayBuffer());
+}
 async function pack(obj) {
   const bytes = new TextEncoder().encode(JSON.stringify(obj));
   if (!window.CompressionStream) return 'J' + B64.enc(bytes);
-  const cs = new CompressionStream('gzip');
-  const buf = await new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer();
-  return 'Z' + B64.enc(new Uint8Array(buf));
+  return 'D' + B64.enc(await squeeze(bytes, 'deflate-raw'));
 }
 async function unpack(str) {
-  const s = (str || '').trim().replace(/\s+/g, '');
+  let s = (str || '').trim();
+  const hash = s.lastIndexOf('#p=');            // tolerate a whole pasted URL
+  if (hash >= 0) s = s.slice(hash + 3);
+  s = s.replace(/\s+/g, '');
   if (!s) return null;
   const body = B64.dec(s.slice(1));
-  if (s[0] === 'J') return JSON.parse(new TextDecoder().decode(body));
-  const ds = new DecompressionStream('gzip');
-  const buf = await new Response(new Blob([body]).stream().pipeThrough(ds)).arrayBuffer();
-  return JSON.parse(new TextDecoder().decode(buf));
+  const fmt = s[0] === 'D' ? 'deflate-raw' : s[0] === 'Z' ? 'gzip' : null;
+  const json = fmt ? await expand(body, fmt) : body;
+  return JSON.parse(new TextDecoder().decode(json));
 }
+
+/* Manual pairing means the two devices are in the same room by definition --
+ * you are holding a phone up to a screen. Host and reflexive candidates are
+ * enough, and every server dropped here is bytes off the QR. */
+const MANUAL_ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], iceCandidatePoolSize: 0 };
+
+/* Chrome emits TCP host candidates on port 9 ("tcptype active" placeholders).
+ * They are no use for a LAN pairing and cost ~120 bytes of QR, so they are left
+ * out of what gets transmitted. The local description keeps them. */
+const forTransmit = sdp => sdp.split('\n').filter(l => !/^a=candidate:\S+ \d+ tcp /i.test(l)).join('\n');
 
 /* ============================== DELAY LINE ============================== */
 
@@ -563,9 +583,9 @@ async function pollStats() {
   });
 }
 
-function newViewerPC(remoteId) {
+function newViewerPC(remoteId, cfg) {
   if (V.pc) { try { V.pc.close(); } catch {} }
-  const pc = V.pc = new RTCPeerConnection(iceConfig());
+  const pc = V.pc = new RTCPeerConnection(cfg || iceConfig());
   dbg('viewer', 'new RTCPeerConnection, peer =', remoteId || '(manual)');
   logPC(pc, 'viewer');
   V.peer = remoteId; V.pendingCands = [];
@@ -698,9 +718,9 @@ function applyBitrate() {
   s.setParameters(p).catch(() => {});
 }
 
-function newCameraPC(dst) {
+function newCameraPC(dst, cfg) {
   if (C.pc) { try { C.pc.close(); } catch {} }
-  const pc = C.pc = new RTCPeerConnection(iceConfig());
+  const pc = C.pc = new RTCPeerConnection(cfg || iceConfig());
   dbg('camera', 'new RTCPeerConnection, dst =', dst || '(manual)');
   logPC(pc, 'camera');
   C.pendingCands = [];
@@ -835,6 +855,154 @@ function stopCamera() {
   $('#camJoin').hidden = false;
 }
 
+/* ========================= MANUAL PAIRING (2 step) =========================
+ * Step 1 is a QR on the PC holding a deep link to this page with the offer in
+ * the fragment: the phone's own camera app opens it, so there is no scanner to
+ * write for the leg that matters. Step 2 comes back the other way, which has no
+ * such trick -- the phone shows its answer as a QR for the PC's webcam, and
+ * falls back to a copyable code where the PC cannot scan.
+ * The PC offers (recvonly) so that the leg a QR can carry is the one that also
+ * bootstraps the phone into the right page and state in a single tap.        */
+
+function joinBase() { return location.origin + location.pathname; }
+
+async function manualOffer() {
+  const btn = $('#mvStart');
+  btn.disabled = true; btn.textContent = 'gathering…';
+  try {
+    const pc = newViewerPC(null, MANUAL_ICE);
+    pc.addTransceiver('video', { direction: 'recvonly' });
+    pc.addTransceiver('audio', { direction: 'recvonly' });
+    slimCodecs(pc);
+    await pc.setLocalDescription(await pc.createOffer());
+    await waitIce(pc, 5000);                    // one blob, no trickle channel
+    logSdp('manual offer', pc.localDescription);
+
+    const code = await pack({ k: 'o', s: forTransmit(pc.localDescription.sdp) });
+    const url = joinBase() + '#p=' + code;
+    $('#mvOffer').value = code;
+    dbg('manual', 'offer code', code.length + ' chars, url', url.length + ' chars');
+
+    const fitted = window.VDQR && VDQR.render(url, $('#mvQr'), 560);
+    $('#mvQrNote').hidden = false;
+    $('#mvQrNote').textContent = fitted
+      ? 'Open this with your phone\u2019s camera. It will start the camera page and produce an answer.'
+      : 'Too long for a QR on this connection \u2014 copy the offer code across instead.';
+    dbg('manual', 'QR', fitted ? 'rendered' : 'DID NOT FIT');
+    btn.textContent = 'Regenerate QR';
+  } catch (e) {
+    dbg('manual', 'offer failed', e);
+    toast('Could not make an offer: ' + e.message);
+    btn.textContent = 'Show pairing QR';
+  }
+  btn.disabled = false;
+}
+
+async function manualFinish(text) {
+  const a = await unpack(text);
+  if (!a || a.k !== 'a') { toast('That does not look like an answer code'); return false; }
+  if (!V.pc) { toast('Show the pairing QR first'); return false; }
+  logSdp('manual answer', { type: 'answer', sdp: a.s });
+  await V.pc.setRemoteDescription({ type: 'answer', sdp: a.s });
+  toast('Answer accepted \u2014 connecting');
+  return true;
+}
+
+/* Phone side: turn an offer code into an answer, and show it back as a QR. */
+async function manualAnswer(code) {
+  show('camera');
+  $('#cManual').open = true;
+  try {
+    if (!C.stream) {
+      C.stream = await getCam(store.get('facing', 'environment'), Number($('#res').value));
+      const vt = C.stream.getVideoTracks()[0];
+      dbg('manual', 'got media', vt ? JSON.stringify(vt.getSettings()) : 'none');
+      $('#pv').srcObject = C.stream;
+      $('#camJoin').hidden = true;
+      $('#camLive').hidden = false;
+      keepAwake();
+    }
+    const o = await unpack(code);
+    if (!o || o.k !== 'o') { toast('That does not look like an offer code'); return; }
+
+    setCamState('building answer\u2026');
+    const pc = newCameraPC(null, MANUAL_ICE);
+    await pc.setRemoteDescription({ type: 'offer', sdp: o.s });
+    slimCodecs(pc);
+    await pc.setLocalDescription(await pc.createAnswer());
+    await waitIce(pc, 5000);
+    logSdp('manual answer', pc.localDescription);
+
+    const ans = await pack({ k: 'a', s: forTransmit(pc.localDescription.sdp) });
+    $('#mcOut').value = ans;
+    $('#mcAnswerRow').hidden = false;
+    $('#mcOfferRow').hidden = true;
+    const fitted = window.VDQR && VDQR.render(ans, $('#mcQr'), 520);
+    dbg('manual', 'answer code', ans.length + ' chars, QR', fitted ? 'rendered' : 'DID NOT FIT');
+    setCamState('answer ready \u2014 show it to the PC');
+    $('#mcAnswerRow').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch (e) {
+    dbg('manual', 'answer failed', e);
+    toast('Pairing failed: ' + e.message);
+  }
+}
+
+/* PC side: read the phone's answer QR off a webcam. BarcodeDetector is absent
+ * on some desktops (notably Chrome on Linux), so this is strictly an optional
+ * accelerator -- the paste box beside it always works. */
+const SCAN = { on: false, stream: null, timer: 0 };
+
+async function scannerAvailable() {
+  if (!('BarcodeDetector' in window)) return false;
+  try { return (await BarcodeDetector.getSupportedFormats()).includes('qr_code'); }
+  catch { return false; }
+}
+
+function stopScan() {
+  SCAN.on = false;
+  clearTimeout(SCAN.timer);
+  if (SCAN.stream) SCAN.stream.getTracks().forEach(t => t.stop());
+  SCAN.stream = null;
+  $('#mvCam').srcObject = null;
+  $('#mvCam').hidden = true;
+  $('#mvScan').textContent = '\uD83D\uDCF7 Scan the phone\u2019s QR';
+}
+
+async function startScan() {
+  if (SCAN.on) { stopScan(); return; }
+  if (!await scannerAvailable()) { toast('No QR scanner in this browser — paste the code instead'); return; }
+  let det;
+  try { det = new BarcodeDetector({ formats: ['qr_code'] }); }
+  catch (e) { toast('Scanner unavailable: ' + e.name); return; }
+  try {
+    SCAN.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } });
+  } catch (e) { dbg('scan', 'getUserMedia failed', e); toast('No webcam available: ' + e.name); return; }
+
+  const v = $('#mvCam');
+  v.srcObject = SCAN.stream; v.hidden = false;
+  await v.play().catch(() => {});
+  SCAN.on = true;
+  $('#mvScan').textContent = 'Stop scanning';
+  dbg('scan', 'started');
+
+  const tick = async () => {
+    if (!SCAN.on) return;
+    try {
+      const found = await det.detect(v);
+      if (found.length) {
+        const text = found[0].rawValue;
+        dbg('scan', 'detected', text.length + ' chars');
+        stopScan();
+        $('#mvIn').value = text;
+        manualFinish(text).catch(e => toast('Could not use that code: ' + e.message));
+        return;
+      }
+    } catch (e) { dbg('scan', 'detect error', e); }
+    SCAN.timer = setTimeout(tick, 150);   // a timer, not rAF: rAF stalls when the tab is not focused
+  };
+  tick();
+}
+
 /* ============================== WIRING ============================== */
 
 function wire() {
@@ -866,7 +1034,7 @@ function wire() {
   $('#goViewer').onclick = () => { location.hash = '#v'; startViewer(); };
   $('#goCamera').onclick = () => { show('camera'); $('#codeIn').focus(); };
   for (const b of document.querySelectorAll('[data-back]')) {
-    b.onclick = () => { stopDelay(); stopCamera(); if (V.sig) V.sig.close(); if (V.pc) try { V.pc.close(); } catch {}
+    b.onclick = () => { stopDelay(); stopCamera(); stopScan(); if (V.sig) V.sig.close(); if (V.pc) try { V.pc.close(); } catch {}
       V.pc = null; V.sig = null; clearInterval(V.statsTimer); location.hash = ''; show('home'); };
   }
 
@@ -933,20 +1101,14 @@ function wire() {
   $('#advReset').onclick = () => { store.set('ice', ''); store.set('signal', ''); location.reload(); };
 
   /* --- manual pairing, viewer side --- */
-  $('#mvGo').onclick = async () => {
-    try {
-      const o = await unpack($('#mvIn').value);
-      if (!o || o.k !== 'offer') { toast('That is not an offer code'); return; }
-      const pc = newViewerPC(null);
-      await pc.setRemoteDescription(o.sdp);
-      await pc.setLocalDescription(await pc.createAnswer());
-      $('#mvOut').value = '…gathering…';
-      await waitIce(pc, 5000);
-      $('#mvOut').value = await pack({ k: 'answer', sdp: sdpJson(pc.localDescription) });
-      toast('Answer ready — send it to the phone');
-    } catch (e) { toast('Could not read that code: ' + e.message); }
-  };
-  $('#mvCopy').onclick = () => { navigator.clipboard.writeText($('#mvOut').value).then(() => toast('Copied'), () => {}); };
+  $('#mvStart').onclick = manualOffer;
+  $('#mvOfferCopy').onclick = () => navigator.clipboard.writeText($('#mvOffer').value).then(() => toast('Offer code copied'), () => toast('Copy failed'));
+  $('#mvScan').onclick = () => startScan().catch(e => toast('Scanner failed: ' + e.message));
+  $('#mvGo').onclick = () => manualFinish($('#mvIn').value).catch(e => toast('Could not read that code: ' + e.message));
+  scannerAvailable().then(ok => {
+    $('#mvScan').disabled = !ok;
+    $('#mvScanNote').textContent = ok ? '' : 'no QR scanner in this browser — paste instead';
+  });
 
   /* --- camera --- */
   $('#codeIn').oninput = e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); };
@@ -979,29 +1141,8 @@ function wire() {
   $('#rate').onchange = applyBitrate;
 
   /* --- manual pairing, camera side --- */
-  $('#mcMake').onclick = async () => {
-    try {
-      if (!C.stream) {
-        C.stream = await getCam(store.get('facing', 'environment'), Number($('#res').value));
-        $('#pv').srcObject = C.stream; $('#camJoin').hidden = true; $('#camLive').hidden = false; keepAwake();
-      }
-      const pc = newCameraPC(null);
-      await pc.setLocalDescription(await pc.createOffer());
-      $('#mcOut').value = '…gathering…';
-      await waitIce(pc, 5000);
-      $('#mcOut').value = await pack({ k: 'offer', sdp: sdpJson(pc.localDescription) });
-      setCamState('offer made — waiting for answer');
-    } catch (e) { toast('Could not make an offer: ' + e.message); }
-  };
-  $('#mcCopy').onclick = () => { navigator.clipboard.writeText($('#mcOut').value).then(() => toast('Copied'), () => {}); };
-  $('#mcGo').onclick = async () => {
-    try {
-      const a = await unpack($('#mcIn').value);
-      if (!a || a.k !== 'answer') { toast('That is not an answer code'); return; }
-      await C.pc.setRemoteDescription(a.sdp);
-      setCamState('connecting…');
-    } catch (e) { toast('Could not read that code: ' + e.message); }
-  };
+  $('#mcGo').onclick = () => manualAnswer($('#mcIn').value.trim());
+  $('#mcCopy').onclick = () => navigator.clipboard.writeText($('#mcOut').value).then(() => toast('Answer code copied'), () => toast('Copy failed'));
 
   /* --- keyboard --- */
   addEventListener('keydown', e => {
@@ -1035,6 +1176,8 @@ function jump(sec) {
 
 function route() {
   const h = location.hash;
+  const p = /^#p=(.+)$/.exec(h);
+  if (p) { manualAnswer(p[1]); return; }        // arrived by scanning the PC's QR
   const m = /^#c=([A-Za-z0-9]+)/.exec(h);
   if (m) { show('camera'); $('#codeIn').value = m[1].toUpperCase(); return; }
   if (h === '#v') { startViewer(); return; }
