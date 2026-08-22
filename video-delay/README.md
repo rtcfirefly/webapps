@@ -171,7 +171,9 @@ checkbox in the panel turns it on if it's genuinely needed.
 ## Pairing security (optional)
 
 Once connected, **Pairing security** on both pages shows a safety code — three
-groups of four letters, plus a QR carrying the full 130-bit value.
+groups of four letters for reading, plus a QR carrying the **entire SHA-256**.
+Nothing has to be typed from the QR, so there is no reason to truncate it: it
+is 52 base32 characters, which is still only a version-3 code.
 
 Both ends derive it by hashing the two **DTLS certificate fingerprints actually
 in use** for the connection, sorted so neither needs to know which end it is.
@@ -186,8 +188,9 @@ in your place. Verification is what turns that from undetectable into obvious.
 Two ways to check, both optional:
 
 - **Scan** — hold the phone up to the PC's webcam and press *Scan the phone's
-  code*. The full value is compared, so this is a real check, not a glance.
-- **By eye** — compare the twelve letters. The alphabet omits `0/O` and `1/I`.
+  code*. All 256 bits are compared, so this is a real check, not a glance.
+- **By eye** — compare the twelve letters (60 bits). Shortened only because a
+  human is reading it; the alphabet omits `0/O` and `1/I` so misreads show.
 
 `verified` means both ends see the same certificate pair. **`MISMATCH` means
 someone is in the middle — stop.** The scan button disables itself where

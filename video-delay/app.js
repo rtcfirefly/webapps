@@ -1425,8 +1425,9 @@ async function startScan({ video, btn, onResult }) {
  * someone register the viewer id first and answer in your place -- necessarily
  * presents a different certificate, and the codes diverge.
  *
- * The QR carries the full 130-bit value so a scan is a real comparison. The
- * printed groups are a shortening for comparing by eye when no camera is free. */
+ * The QR is machine-read, so it carries the WHOLE SHA-256 -- there is no reason
+ * to truncate a value nobody has to type. Only the printed groups are shortened,
+ * and only because they exist to be compared by eye when no camera is free. */
 
 const VFY = { full: '', short: '', state: 'unknown' };
 
@@ -1435,9 +1436,10 @@ function b32(bytes, n) {
   for (const b of bytes) {
     val = ((val << 8) | b) >>> 0; bits += 8;
     while (bits >= 5) { out += ALPHA[(val >>> (bits - 5)) & 31]; bits -= 5; }
-    if (out.length >= n) break;
+    if (n && out.length >= n) break;
   }
-  return out.slice(0, n);
+  if (bits > 0 && (!n || out.length < n)) out += ALPHA[(val << (5 - bits)) & 31];  // flush the tail
+  return n ? out.slice(0, n) : out;
 }
 
 function dtlsPrint(desc) {
@@ -1452,7 +1454,7 @@ async function computeSas(pc) {
   // Sorted, so both ends derive the same value without agreeing who is who.
   const material = 'video-delay/sas/v1|' + [a, b].sort().join('|');
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material)));
-  const full = b32(digest, 26);
+  const full = b32(digest);            // all 256 bits, 52 base32 chars
   return { full, short: full.slice(0, 12).replace(/(.{4})(.{4})(.{4})/, '$1 $2 $3') };
 }
 
