@@ -54,11 +54,25 @@ button.big2, .big2 { width: 100%; padding: 16px; font-size: 17px; font-weight: 6
 .big small { color: var(--dim); font-weight: 400; }
 
 /* ---- viewer stage ---- */
-.stage { position: relative; flex: 1 1 auto; min-height: 220px; background: #000; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
-.stage video#v { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
-.stage.mirror video#v { transform: scaleX(-1); }
+.stage { position: relative; flex: 1 1 auto; min-height: 220px; display: flex; gap: 2px; background: #000; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
 .stage:fullscreen { border-radius: 0; border: none; }
-video#pip { position: absolute; right: 10px; top: 10px; width: 22%; min-width: 120px; max-width: 260px; border: 1px solid var(--line); border-radius: 8px; background: #000; box-shadow: 0 6px 20px #0009; }
+.pane { position: relative; flex: 1 1 0; min-width: 0; background: #000; }
+.pane video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+.stage.mirror .pane video { transform: scaleX(-1); }
+
+/* Tall video on a wide-ish stage: two half-panes are close to 1:2, portrait
+   capture is 9:16, so `contain` leaves almost no letterboxing. */
+.tag { position: absolute; top: 8px; left: 8px; z-index: 2; pointer-events: none;
+  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .09em; text-transform: uppercase;
+  background: #000b; border: 1px solid #ffffff1a; border-radius: 999px; padding: 5px 9px; color: var(--dim); }
+#paneDelay .tag { color: var(--accent2); }
+
+.stage[data-layout="delayed"] #paneLive { display: none; }
+.stage[data-layout="pip"] #paneLive {
+  position: absolute; right: 10px; top: 10px; z-index: 3;
+  flex: none; width: 20%; min-width: 110px; max-width: 240px; aspect-ratio: 9 / 16;
+  border: 1px solid var(--line); border-radius: 8px; overflow: hidden; box-shadow: 0 6px 20px #0009; }
+.stage[data-layout="pip"] #paneLive .tag { top: 4px; left: 4px; padding: 3px 6px; font-size: 9px; }
 
 .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: #000a; backdrop-filter: blur(2px); text-align: center; padding: 20px; }
 .ovnum { font-size: clamp(40px, 12vw, 92px); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.03em; }

@@ -354,6 +354,7 @@ function bypassToLive(why) {
   dbg('delay', 'BYPASS to live video:', why);
   D.bypass = true;
   clearInterval(D.timer); D.timer = 0;
+  setDelayTag();
   try { D.rec && D.rec.state !== 'inactive' && D.rec.stop(); } catch {}
   D.video.removeAttribute('src');
   D.video.srcObject = D.stream;
@@ -514,7 +515,7 @@ function maintain() {
 
 /* ============================== VIEWER UI ============================== */
 
-const V = { sig: null, pc: null, room: '', peer: null, manual: false, pendingCands: [], stats: null, statsTimer: 0 };
+const V = { sig: null, pc: null, room: '', peer: null, manual: false, reoffer: 0, pendingCands: [], stats: null, statsTimer: 0 };
 
 function show(id) {
   for (const s of document.querySelectorAll('.view')) s.hidden = (s.id !== id);
@@ -543,10 +544,34 @@ function setDelay(sec, persist = true) {
   }
   $('#delay').value = clamp(sec, 0, 180);
   $('#delayNum').value = sec;
+  setDelayTag();
   if (persist) store.set('delay', sec);
 }
 
 function setLiveBtn() { $('#btnLive').classList.toggle('on', !D.live); }
+
+/* split  — live left, delayed right. Two portrait feeds on a squarish screen.
+ * delayed — delayed only, full stage.
+ * pip     — delayed full stage with the live feed as a corner thumbnail. */
+const LAYOUTS = {
+  split:   { label: '\u25A5\u00A0Split',   on: true  },
+  delayed: { label: '\u25A4\u00A0Delayed', on: false },
+  pip:     { label: '\u25A3\u00A0PiP',     on: true  },
+};
+function setLayout(l) {
+  if (!LAYOUTS[l]) l = 'split';
+  $('#stage').dataset.layout = l;
+  $('#btnLayout').innerHTML = LAYOUTS[l].label;
+  $('#btnLayout').classList.toggle('on', LAYOUTS[l].on);
+  store.set('layout', l);
+  dbg('viewer', 'layout =', l);
+  if (l !== 'delayed') $('#pip').play().catch(() => {});
+}
+
+function setDelayTag() {
+  const s = Math.round(D.delayMs / 1000);
+  $('#delayTag').textContent = D.bypass ? 'live (no delay)' : (s ? s + 's delay' : 'no delay');
+}
 
 function updateOverlay() {
   const ov = $('#overlay'), video = D.video;
@@ -597,7 +622,7 @@ function updateHud() {
 
 function attachRemote(stream) {
   $('#pip').srcObject = stream;
-  if (!$('#pip').hidden) $('#pip').play().catch(() => {});
+  $('#pip').play().catch(() => {});
   startDelay(stream, $('#v'));
   clearInterval(V.statsTimer);
   V.statsTimer = setInterval(pollStats, 1000);
@@ -632,6 +657,13 @@ function newViewerPC(remoteId, cfg) {
     updateHud();
     if (pc.connectionState === 'connected') setSig('phone connected', 'ok');
     if (pc.connectionState === 'failed') { setSig('connection failed', 'bad'); toast('Connection failed — try again, or enable TURN'); }
+    if (V.manual && ['failed', 'disconnected', 'closed'].includes(pc.connectionState) &&
+        !$('#mvStart').disabled && store.get('paired', '') === 'manual') {
+      dbg('viewer', 'manual pairing dropped - putting a fresh QR up');
+      $('#vManual').open = true;
+      clearTimeout(V.reoffer);
+      V.reoffer = setTimeout(() => manualOffer(), 1200);
+    }
     if (pc.connectionState === 'disconnected' || pc.connectionState === 'closed') setSig('phone disconnected', 'bad');
   });
   return pc;
@@ -667,6 +699,17 @@ async function startViewer() {
   setDelay(store.get('delay', 30), false);
   renderJoin(store.get('room', '') || newRoom(), 'startup');
   updateOverlay();
+
+  // A WebRTC session cannot outlive its page: reloading destroys the
+  // RTCPeerConnection, and nothing in the browser can carry a live DTLS/ICE
+  // session across that. What a reload CAN do is come back ready to re-pair,
+  // so if the last pairing was manual, put the QR on screen immediately --
+  // recovery is then one scan rather than a hunt through the panels.
+  if (store.get('paired', '') === 'manual') {
+    $('#vManual').open = true;
+    dbg('viewer', 'last pairing was manual - regenerating the QR for a quick re-pair');
+    manualOffer();
+  }
   await connectViewerSignal();
 }
 
@@ -982,6 +1025,7 @@ async function manualOffer() {
   btn.disabled = true; btn.textContent = 'gathering…';
   try {
     V.manual = true;
+    store.set('paired', 'manual');
     const pc = newViewerPC(null, MANUAL_ICE);
     pc.addTransceiver('video', { direction: 'recvonly' });
     pc.addTransceiver('audio', { direction: 'recvonly' });
@@ -1041,6 +1085,9 @@ async function manualFinish(text) {
 async function manualAnswer(code) {
   show('camera');
   $('#cManual').open = true;
+  $('#mcAnswerRow').hidden = true;          // re-pairing: clear the previous answer
+  $('#mcOfferRow').hidden = false;
+  clearTimeout(C.answerTimer);
   try {
     if (!C.stream) {
       C.stream = await getCam(store.get('facing', 'environment'), Number($('#res').value));
@@ -1190,12 +1237,11 @@ function wire() {
     $('#btnMirror').classList.toggle('on', on);
     store.set('mirror', on);
   };
-  $('#btnPip').onclick = () => {
-    const p = $('#pip');
-    p.hidden = !p.hidden;
-    $('#btnPip').classList.toggle('on', !p.hidden);
-    if (!p.hidden) p.play().catch(() => {});
+  $('#btnLayout').onclick = () => {
+    const order = ['split', 'delayed', 'pip'];
+    setLayout(order[(order.indexOf(store.get('layout', 'split')) + 1) % order.length]);
   };
+  setLayout(store.get('layout', 'split'));
   $('#btnMute').onclick = () => {
     const v = $('#v');
     v.muted = !v.muted;
@@ -1282,7 +1328,7 @@ function wire() {
     if (k === ' ') { e.preventDefault(); $('#btnFreeze').click(); }
     else if (k === 'f') $('#btnFs').click();
     else if (k === 'm') $('#btnMirror').click();
-    else if (k === 'p') $('#btnPip').click();
+    else if (k === 'p') $('#btnLayout').click();
     else if (k === 'u') $('#btnMute').click();
     else if (k === 'l') $('#btnLive').click();
     else if (e.key === 'ArrowLeft') { e.preventDefault(); jump(e.shiftKey ? -30 : -5); }
@@ -1313,6 +1359,8 @@ function route() {
   if (h === '#v') { startViewer(); return; }
   show('home');
 }
+
+addEventListener('hashchange', () => { dbg('route', 'hashchange ->', location.hash.slice(0, 24) + '…'); route(); });
 
 wire();
 route();

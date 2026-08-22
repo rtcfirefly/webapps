@@ -27,12 +27,18 @@
 
 <!-- ============================ viewer ============================ -->
 <section id="viewer" class="view" hidden>
-  <div class="stage" id="stage">
-    <video id="v" playsinline muted></video>
-    <video id="pip" playsinline muted hidden></video>
-    <div class="overlay" id="overlay">
-      <div class="ovnum" id="ovNum">··</div>
-      <div class="ovmsg" id="ovMsg">waiting for phone…</div>
+  <div class="stage" id="stage" data-layout="split">
+    <div class="pane" id="paneLive">
+      <video id="pip" playsinline muted></video>
+      <div class="tag">live</div>
+    </div>
+    <div class="pane" id="paneDelay">
+      <video id="v" playsinline muted></video>
+      <div class="tag" id="delayTag">30s delay</div>
+      <div class="overlay" id="overlay">
+        <div class="ovnum" id="ovNum">··</div>
+        <div class="ovmsg" id="ovMsg">waiting for phone…</div>
+      </div>
     </div>
     <div class="hud" id="hud"></div>
   </div>
@@ -49,7 +55,7 @@
       <button id="btnBack" title="Replay 10 s (←)">⏪&nbsp;10s</button>
       <button id="btnFreeze" title="Freeze frame (Space)">Freeze</button>
       <button id="btnMirror" title="Mirror image (M)">Mirror</button>
-      <button id="btnPip" title="Live (undelayed) thumbnail (P)">Live&nbsp;PiP</button>
+      <button id="btnLayout" title="Layout: split / delayed only / corner thumbnail (P)">▥&nbsp;Split</button>
       <button id="btnMute" title="Audio on/off (U)">🔇</button>
       <button id="btnFs" title="Fullscreen (F)">⛶</button>
       <button id="btnLog" title="Debug log">🐞</button>
