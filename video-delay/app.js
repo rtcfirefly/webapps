@@ -571,6 +571,28 @@ function setLayout(l) {
 function setDelayTag() {
   const s = Math.round(D.delayMs / 1000);
   $('#delayTag').textContent = D.bypass ? 'live (no delay)' : (s ? s + 's delay' : 'no delay');
+  $('#fsVal').textContent = s + 's';
+}
+
+/* Fullscreen hides the toolbar, so the in-stage bar carries the delay there.
+ * It fades out with the cursor after a few idle seconds and comes back on any
+ * pointer movement or key. */
+function fsIdleWatch() {
+  const stage = $('#stage');
+  const wake = () => {
+    stage.classList.remove('idle');
+    clearTimeout(fsIdleWatch.t);
+    fsIdleWatch.t = setTimeout(() => {
+      if (document.fullscreenElement === stage) stage.classList.add('idle');
+    }, 2800);
+  };
+  stage.addEventListener('pointermove', wake);
+  stage.addEventListener('pointerdown', wake);
+  addEventListener('keydown', wake);
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement === stage) wake();
+    else { clearTimeout(fsIdleWatch.t); stage.classList.remove('idle'); }
+  });
 }
 
 function updateOverlay() {
@@ -1249,6 +1271,14 @@ function wire() {
     $('#btnMute').classList.toggle('on', !v.muted);
     if (!v.muted) v.play().catch(() => {});
   };
+  for (const b of document.querySelectorAll('#fsbar button')) {
+    b.onclick = () => {
+      setDelay(D.delayMs / 1000 + Number(b.dataset.d));
+      b.blur();                 // keep Space on Freeze rather than this button
+    };
+  }
+  fsIdleWatch();
+
   $('#btnFs').onclick = () => {
     if (document.fullscreenElement) document.exitFullscreen();
     else $('#stage').requestFullscreen().catch(() => {});
@@ -1333,8 +1363,17 @@ function wire() {
     else if (k === 'l') $('#btnLive').click();
     else if (e.key === 'ArrowLeft') { e.preventDefault(); jump(e.shiftKey ? -30 : -5); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); jump(e.shiftKey ? 30 : 5); }
-    else if (k === '+' || k === '=') setDelay(D.delayMs / 1000 + 5);
-    else if (k === '-') setDelay(D.delayMs / 1000 - 5);
+    // Delay nudges. '+' is already Shift+'=' on most layouts, so the shifted
+    // glyph itself selects the 5 s step rather than a Shift modifier:
+    //   -  =   ±1     _  +   ±5     Alt with any of them  ±10
+    // Arrow up/down do the same with Shift/Alt, for anyone who prefers them.
+    else if (['-', '=', '_', '+', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+      e.preventDefault();
+      const arrow = e.key === 'ArrowUp' || e.key === 'ArrowDown';
+      const down = e.key === '-' || e.key === '_' || e.key === 'ArrowDown';
+      const step = e.altKey ? 10 : (e.key === '_' || e.key === '+' || (arrow && e.shiftKey)) ? 5 : 1;
+      setDelay(D.delayMs / 1000 + (down ? -step : step));
+    }
   });
 }
 

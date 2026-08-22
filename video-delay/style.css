@@ -131,3 +131,18 @@ video#pv { width: 100%; max-height: 46dvh; object-fit: contain; background: #000
 details.sub { margin-top: 8px; }
 details.sub summary { cursor: pointer; color: var(--dim); font-size: 13px; }
 details.sub[open] summary { margin-bottom: 8px; }
+
+/* In-stage delay control. The toolbar lives outside #stage, so fullscreen
+   hides it; this bar is inside the fullscreen element and only shown there. */
+.fsbar { display: none; position: absolute; left: 50%; bottom: 4dvh; transform: translateX(-50%);
+  z-index: 4; align-items: center; gap: 8px; padding: 10px 14px;
+  background: #000c; border: 1px solid #ffffff24; border-radius: 999px;
+  backdrop-filter: blur(6px); transition: opacity .25s ease; }
+.stage:fullscreen .fsbar { display: flex; }
+.stage:fullscreen.idle .fsbar { opacity: 0; pointer-events: none; }
+.stage:fullscreen.idle { cursor: none; }
+.fsbar button { min-width: 58px; padding: 12px 14px; font-size: 17px; font-variant-numeric: tabular-nums;
+  background: #ffffff14; border-color: #ffffff24; }
+.fsbar button:hover { background: #ffffff2e; }
+.fsval { min-width: 92px; text-align: center; font: 700 26px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums; color: var(--accent2); }

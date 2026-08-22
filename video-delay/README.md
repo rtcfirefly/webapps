@@ -27,11 +27,18 @@ watch yourself half a minute ago.
 | **⏪ 10s** | replay within the buffer (last 40 s of played video is kept) |
 | **Freeze** | freeze frame; unfreezing leaves you in replay |
 | **Mirror** | flip horizontally — for practising in front of it |
-| **Live PiP** | small *undelayed* thumbnail in the corner, for framing the shot |
+| **Layout** | **split** (live left, delayed right), **delayed only**, or a corner live thumbnail |
 | **⛶** | fullscreen |
 
-Keys: `space` freeze · `f` fullscreen · `m` mirror · `p` PiP · `u` audio ·
-`l` live · `←`/`→` jump 5 s (`shift` 30 s) · `+`/`-` delay ±5 s.
+In **fullscreen** the toolbar is gone, so a control bar inside the video
+carries the delay: `−10 −5 −1 · 30s · +1 +5 +10`. It fades out with the cursor
+after a few idle seconds and returns on any movement or key.
+
+Keys: `space` freeze · `f` fullscreen · `m` mirror · `p` layout · `u` audio ·
+`l` live · `←`/`→` jump 5 s (`shift` 30 s).
+Delay: `-`/`=` ±1 s · `_`/`+` ±5 s · `alt` with any of them ±10 s (`↑`/`↓` also
+work, with `shift` for 5 s). `+` is already Shift+`=` on most layouts, so the
+shifted glyph picks the bigger step rather than a Shift modifier.
 
 ## How it works
 
