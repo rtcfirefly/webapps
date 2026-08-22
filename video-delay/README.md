@@ -44,7 +44,10 @@ the LAN.
 static, so there is nothing to run a socket on. The app talks the PeerJS public
 broker's protocol directly over a WebSocket (no `peerjs` library — it's about
 40 lines in `app.js`). The broker only relays `{type, dst, payload}` blobs; it
-never sees media. Two escape hatches if it's down or you don't want to use it:
+never sees media. SDP goes over it with trickle ICE, so each message stays
+small and the socket is only needed while a call is being set up — once media
+flows, the broker can vanish without affecting anything. Both sides reconnect
+with backoff. Two escape hatches if it's down or you don't want to use it:
 
 - **Manual pairing** — under *Pair manually* on both pages. Phone makes an
   offer code, you get it to the PC, PC hands back an answer code. Codes are
@@ -97,7 +100,11 @@ works anywhere.
 ## Troubleshooting
 
 - **"no broker" / manual pairing opens by itself** — the public PeerJS broker is
-  down or blocked. Use manual pairing, or run `signal-server.js`.
+  down or blocked. It keeps retrying in the background; meanwhile use manual
+  pairing, or run `signal-server.js`.
+- **"broker dropped" on the phone** — phones close WebSockets on backgrounding,
+  screen-off and network handover. It reconnects automatically, and a call that
+  is already up is unaffected.
 - **"no viewer with that code"** — open the Viewer page first; it has to be
   registered before the phone offers. Codes are per-browser and persist.
 - **Connects, then fails** — usually a NAT that needs TURN. The bundled public

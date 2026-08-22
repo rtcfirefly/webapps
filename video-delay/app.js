@@ -68,8 +68,8 @@ class Signal extends EventTarget {
       const url = `${SIGNAL_URL}?key=peerjs&id=${encodeURIComponent(this.id)}&token=${token}&version=1.5.4`;
       let ws;
       try { ws = this.ws = new WebSocket(url); } catch (e) { reject(e); return; }
-      let open = false;
-      const fail = (e) => { if (!open) { open = true; reject(e); try { ws.close(); } catch {} } };
+      let settled = false, live = false;
+      const fail = (e) => { if (settled) return; settled = true; clearTimeout(timer); reject(e); try { ws.close(); } catch {} };
 
       const timer = setTimeout(() => fail(new Error('signalling timed out')), 12000);
 
@@ -77,13 +77,13 @@ class Signal extends EventTarget {
       ws.onerror = () => fail(new Error('signalling connection failed'));
       ws.onclose = () => {
         clearInterval(this.hb);
-        if (!open) fail(new Error('signalling closed'));
-        else this.dispatchEvent(new Event('down'));
+        if (!settled) fail(new Error('signalling closed'));
+        else if (live) { live = false; this.dispatchEvent(new Event('down')); }
       };
       ws.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch { return; }
-        if (m.type === 'OPEN') { clearTimeout(timer); open = true; resolve(); return; }
-        if (m.type === 'ID-TAKEN') { clearTimeout(timer); fail(new Error('ID-TAKEN')); return; }
+        if (m.type === 'OPEN') { clearTimeout(timer); settled = true; live = true; resolve(); return; }
+        if (m.type === 'ID-TAKEN') { fail(new Error('ID-TAKEN')); return; }
         this.dispatchEvent(new CustomEvent('msg', { detail: m }));
       };
     });
@@ -153,6 +153,9 @@ const D = {
   frozen: false,
   timer: 0,
   lastAppend: 0,
+  lastSeek: 0,
+  lastTime: -1,
+  lastMove: 0,
   firstRelease: 0,
   bypass: false,  // true if we gave up and fell back to undelayed playback
 };
@@ -174,6 +177,7 @@ function stopDelay() {
   if (D.video) { D.video.removeAttribute('src'); D.video.srcObject = null; try { D.video.load(); } catch {} }
   D.rec = D.ms = D.sb = null; D.queue = []; D.pending = [];
   D.live = true; D.frozen = false; D.bypass = false; D.firstRelease = 0;
+  D.lastAppend = 0; D.lastSeek = 0; D.lastTime = -1; D.lastMove = 0;
 }
 
 function bypassToLive(why) {
@@ -291,7 +295,13 @@ function maintain() {
   if (video.currentTime < start) video.currentTime = start + 0.05;
 
   const lead = end - video.currentTime;
-  if (D.live && lead > 2.5) video.currentTime = Math.max(start + 0.05, end - TARGET_LEAD);
+  // Re-seek only once the burst of appends a delay change produces has fully
+  // drained, and at most every 400 ms. Seeking on every updateend pins
+  // readyState below HAVE_CURRENT_DATA and the picture never comes back.
+  if (D.live && lead > 2.5 && !D.pending.length && !D.sb.updating && now() - D.lastSeek > 400) {
+    D.lastSeek = now();
+    video.currentTime = Math.max(start + 0.05, end - TARGET_LEAD);
+  }
   // Scrubbed back and left there: don't let the buffer run away.
   if (!D.live && lead > KEEP_BEHIND + 60) { D.live = true; setLiveBtn(); }
 
@@ -330,17 +340,21 @@ function updateOverlay() {
     $('#ovMsg').textContent = V.pc ? 'connecting…' : 'waiting for phone…';
     return;
   }
-  if (D.bypass || (video && video.readyState >= 2 && !isStalled())) { ov.hidden = true; return; }
+  if (D.bypass) { ov.hidden = true; return; }
+
+  // Never cover a picture that exists. Either there is data ahead of the
+  // playhead, or frames moved a moment ago -- either way, get out of the way.
+  // (readyState is not usable here: a seek drops it, and delay changes seek.)
+  if (video && video.currentTime !== D.lastTime) { D.lastTime = video.currentTime; D.lastMove = now(); }
+  const ahead = (D.sb && D.sb.buffered.length && video)
+    ? D.sb.buffered.end(D.sb.buffered.length - 1) - video.currentTime : 0;
+  if (D.frozen || ahead > 0.2 || (D.lastMove && now() - D.lastMove < 700)) { ov.hidden = true; return; }
 
   const head = D.queue.find(c => c.buf) || D.queue[0];
   const left = head ? Math.max(0, (D.delayMs - (now() - head.t)) / 1000) : D.delayMs / 1000;
   ov.hidden = false;
-  $('#ovNum').textContent = left >= 1 ? Math.ceil(left) : '▶';
-  $('#ovMsg').textContent = left >= 1 ? 'filling the ' + Math.round(D.delayMs / 1000) + 's buffer…' : 'starting…';
-}
-
-function isStalled() {
-  return D.queue.length > 0 && !D.pending.length && D.lastAppend && (now() - D.lastAppend) > 900;
+  $('#ovNum').textContent = left >= 1 ? Math.ceil(left) : '\u00b7\u00b7';
+  $('#ovMsg').textContent = left >= 1 ? 'filling the ' + Math.round(D.delayMs / 1000) + 's buffer\u2026' : 'starting\u2026';
 }
 
 function updateHud() {
@@ -406,15 +420,15 @@ function newViewerPC(remoteId) {
 }
 
 async function handleOffer(m) {
-  setSig('phone found — negotiating…');
+  setSig('phone found \u2014 negotiating\u2026');
+  const early = V.pendingCands;          // candidates that beat the offer here
   const pc = newViewerPC(m.src);
   await pc.setRemoteDescription(m.payload.sdp);
-  for (const c of V.pendingCands) { try { await pc.addIceCandidate(c); } catch {} }
-  V.pendingCands = [];
-  const ans = await pc.createAnswer();
-  await pc.setLocalDescription(ans);
-  await waitIce(pc, 3000);
-  V.sig.send('ANSWER', m.src, { sdp: sdpJson(pc.localDescription) });
+  // Answer immediately and trickle candidates as separate messages. A
+  // fully-gathered SDP is both slow and a large single broker message.
+  await pc.setLocalDescription(await pc.createAnswer());
+  if (V.sig) V.sig.send('ANSWER', m.src, { sdp: sdpJson(pc.localDescription) });
+  for (const c of early) { try { await pc.addIceCandidate(c); } catch {} }
 }
 
 async function startViewer() {
@@ -433,40 +447,57 @@ function renderJoin(room) {
   $('#joinUrl').dataset.url = url;
 }
 
+let vTaken = 0, vBackoff = 1000, vTimer = 0;
+
 async function connectViewerSignal() {
-  if (V.sig) V.sig.close();
-  setSig('connecting to broker…');
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const sig = V.sig = new Signal(viewerId(V.room));
-    try {
-      await sig.open();
-      setSig('waiting for phone', 'ok');
-      sig.addEventListener('msg', ev => {
-        const m = ev.detail;
-        if (m.type === 'OFFER') handleOffer(m).catch(e => { console.warn(e); toast('Negotiation failed: ' + e.message); });
-        else if (m.type === 'CANDIDATE') {
-          if (V.pc && V.pc.remoteDescription) V.pc.addIceCandidate(m.payload).catch(() => {});
-          else V.pendingCands.push(m.payload);
-        }
-      });
-      sig.addEventListener('down', () => {
-        setSig('broker dropped — retrying', 'bad');
-        setTimeout(() => connectViewerSignal(), 2000);
-      });
-      return;
-    } catch (e) {
-      if (e.message === 'ID-TAKEN') { renderJoin(newRoom()); continue; }
-      setSig('no broker: ' + e.message, 'bad');
-      $('#vManual').open = true;
-      toast('Signalling broker unreachable — use manual pairing below');
-      return;
+  clearTimeout(vTimer);
+  if (V.sig) { V.sig.close(); V.sig = null; }
+  if ($('#viewer').hidden) return;
+  setSig('connecting to broker\u2026');
+
+  const sig = new Signal(viewerId(V.room));
+  try {
+    await sig.open();
+  } catch (e) {
+    if (e.message === 'ID-TAKEN') {
+      // Nearly always our own previous session that the broker has not
+      // reaped yet. Retry the same code before changing what the PC shows --
+      // minting a new code silently invalidates whatever the phone was told.
+      if (++vTaken <= 4) { setSig('code busy \u2014 retrying\u2026'); vTimer = setTimeout(connectViewerSignal, 2000); return; }
+      vTaken = 0; renderJoin(newRoom()); vTimer = setTimeout(connectViewerSignal, 300); return;
     }
+    setSig('no broker: ' + e.message, 'bad');
+    $('#vManual').open = true;
+    toast('Signalling broker unreachable \u2014 use manual pairing below');
+    vBackoff = Math.min(vBackoff * 2, 30000);
+    vTimer = setTimeout(connectViewerSignal, vBackoff);
+    return;
   }
+
+  V.sig = sig; vTaken = 0; vBackoff = 1000;
+  const connected = () => V.pc && V.pc.connectionState === 'connected';
+  setSig(connected() ? 'phone connected' : 'waiting for phone', 'ok');
+
+  sig.addEventListener('msg', ev => {
+    const m = ev.detail;
+    if (m.type === 'OFFER') handleOffer(m).catch(e => { console.warn(e); toast('Negotiation failed: ' + e.message); });
+    else if (m.type === 'CANDIDATE') {
+      if (V.pc && V.pc.remoteDescription) V.pc.addIceCandidate(m.payload).catch(() => {});
+      else V.pendingCands.push(m.payload);
+    }
+  });
+  sig.addEventListener('down', () => {
+    if (V.sig !== sig) return;
+    V.sig = null;
+    // Media is peer-to-peer: losing the broker does not hurt a live call.
+    setSig(connected() ? 'phone connected' : 'broker dropped \u2014 reconnecting', connected() ? 'ok' : 'bad');
+    vTimer = setTimeout(connectViewerSignal, 1500);
+  });
 }
 
 /* ============================== CAMERA UI ============================== */
 
-const C = { sig: null, pc: null, stream: null, room: '', wake: null, retry: 0 };
+const C = { sig: null, pc: null, stream: null, room: '', wake: null, retry: 0, pendingCands: [], backoff: 1000 };
 
 async function getCam(facing, height) {
   return navigator.mediaDevices.getUserMedia({
@@ -501,6 +532,7 @@ function applyBitrate() {
 function newCameraPC(dst) {
   if (C.pc) { try { C.pc.close(); } catch {} }
   const pc = C.pc = new RTCPeerConnection(iceConfig());
+  C.pendingCands = [];
   for (const t of C.stream.getTracks()) pc.addTrack(t, C.stream);
   pc.addEventListener('icecandidate', e => {
     if (e.candidate && C.sig && dst) C.sig.send('CANDIDATE', dst, e.candidate.toJSON());
@@ -515,13 +547,82 @@ function newCameraPC(dst) {
 }
 
 async function negotiate() {
+  if (!C.sig || !C.stream) return;
   const dst = viewerId(C.room);
   const pc = newCameraPC(dst);
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  await waitIce(pc, 3000);
+  // Trickle. The previous version waited for full ICE gathering and shipped
+  // host + srflx + relay candidates for four TURN URLs in a single broker
+  // message, which is slow and large enough to get the socket closed.
+  await pc.setLocalDescription(await pc.createOffer());
   C.sig.send('OFFER', dst, { sdp: sdpJson(pc.localDescription) });
-  setCamState('offer sent…');
+  setCamState('offer sent\u2026');
+}
+
+async function onCamMsg(ev) {
+  const m = ev.detail;
+  if (m.type === 'ANSWER') {
+    if (!C.pc) return;
+    try {
+      await C.pc.setRemoteDescription(m.payload.sdp);
+      setCamState('answered \u2014 connecting\u2026');
+      for (const c of C.pendingCands) { try { await C.pc.addIceCandidate(c); } catch {} }
+      C.pendingCands = [];
+    } catch (e) { console.warn('[vd] answer', e); }
+  } else if (m.type === 'CANDIDATE') {
+    if (C.pc && C.pc.remoteDescription) C.pc.addIceCandidate(m.payload).catch(() => {});
+    else C.pendingCands.push(m.payload);
+  } else if (m.type === 'EXPIRE') {
+    setCamState('no viewer with that code', 'bad');
+    clearTimeout(C.retry);
+    C.retry = setTimeout(() => negotiate().catch(() => {}), 3000);
+  }
+}
+
+// The broker socket is only needed to set a call up. It gets dropped a lot on
+// phones (backgrounding, screen-off, network handover), so reconnect rather
+// than reporting failure -- and never renegotiate a call that is already up.
+async function connectCameraSignal(renegotiate = true) {
+  clearTimeout(C.retry);
+  if (!C.stream) return;
+  if (C.sig) { C.sig.close(); C.sig = null; }
+
+  const live = () => C.pc && C.pc.connectionState === 'connected';
+  if (!live()) setCamState('connecting to broker\u2026');
+
+  const sig = new Signal(cameraId(C.room));
+  try {
+    await sig.open();
+  } catch (e) {
+    if (!live()) {
+      setCamState('no broker \u2014 retrying', 'bad');
+      if (!$('#cManual').open) {
+        $('#cManual').open = true;
+        toast('Signalling broker unreachable \u2014 retrying, or pair manually below');
+      }
+    }
+    C.backoff = Math.min(C.backoff * 2, 30000);
+    C.retry = setTimeout(() => connectCameraSignal(!live()), C.backoff);
+    return;
+  }
+
+  C.sig = sig; C.backoff = 1000;
+  sig.addEventListener('msg', onCamMsg);
+  sig.addEventListener('down', () => {
+    if (C.sig !== sig) return;
+    C.sig = null;
+    if (live()) { setCamState('connected', 'ok'); C.retry = setTimeout(() => connectCameraSignal(false), 5000); return; }
+    setCamState('broker dropped \u2014 reconnecting', 'bad');
+    C.retry = setTimeout(() => connectCameraSignal(true), 1500);
+  });
+
+  if (renegotiate && !live()) await negotiate();
+  else if (live()) setCamState('connected', 'ok');
+}
+
+function onCamVisible() {
+  if (document.hidden || !C.stream) return;
+  keepAwake();
+  if (!C.sig) connectCameraSignal(!(C.pc && C.pc.connectionState === 'connected'));
 }
 
 async function startCamera(room) {
@@ -536,35 +637,17 @@ async function startCamera(room) {
   $('#camJoin').hidden = true;
   $('#camLive').hidden = false;
   keepAwake();
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) keepAwake(); });
+  document.removeEventListener('visibilitychange', onCamVisible);
+  document.addEventListener('visibilitychange', onCamVisible);
 
-  setCamState('connecting to broker…');
-  const sig = C.sig = new Signal(cameraId(C.room));
-  try { await sig.open(); } catch (e) {
-    setCamState('no broker', 'bad');
-    $('#cManual').open = true;
-    toast('Signalling broker unreachable — use manual pairing below');
-    return;
-  }
-  sig.addEventListener('msg', async ev => {
-    const m = ev.detail;
-    if (m.type === 'ANSWER') {
-      try { await C.pc.setRemoteDescription(m.payload.sdp); setCamState('answered — connecting…'); }
-      catch (e) { console.warn(e); }
-    } else if (m.type === 'CANDIDATE') {
-      if (C.pc) C.pc.addIceCandidate(m.payload).catch(() => {});
-    } else if (m.type === 'EXPIRE') {
-      setCamState('no viewer with that code', 'bad');
-      clearTimeout(C.retry);
-      C.retry = setTimeout(() => negotiate().catch(() => {}), 3000);
-    }
-  });
-  sig.addEventListener('down', () => setCamState('broker dropped', 'bad'));
-  await negotiate();
+  C.backoff = 1000;
+  await connectCameraSignal(true);
 }
 
 function stopCamera() {
   clearTimeout(C.retry);
+  document.removeEventListener('visibilitychange', onCamVisible);
+  C.backoff = 1000; C.pendingCands = [];
   if (C.sig) C.sig.close();
   if (C.pc) { try { C.pc.close(); } catch {} }
   if (C.stream) C.stream.getTracks().forEach(t => t.stop());
