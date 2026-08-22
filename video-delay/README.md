@@ -168,6 +168,31 @@ summary every 5 s.
 just your network. Full SDP is *off* by default for the same reason; the
 checkbox in the panel turns it on if it's genuinely needed.
 
+## Pairing security (optional)
+
+Once connected, **Pairing security** on both pages shows a safety code — three
+groups of four letters, plus a QR carrying the full 130-bit value.
+
+Both ends derive it by hashing the two **DTLS certificate fingerprints actually
+in use** for the connection, sorted so neither needs to know which end it is.
+Those fingerprints are what the media stream is authenticated against, so
+anyone who came between you on the signalling channel must present a different
+certificate — and the codes diverge.
+
+That matters here because the peer id is derived from the room code: someone
+who guesses your six characters could register the viewer id first and answer
+in your place. Verification is what turns that from undetectable into obvious.
+
+Two ways to check, both optional:
+
+- **Scan** — hold the phone up to the PC's webcam and press *Scan the phone's
+  code*. The full value is compared, so this is a real check, not a glance.
+- **By eye** — compare the twelve letters. The alphabet omits `0/O` and `1/I`.
+
+`verified` means both ends see the same certificate pair. **`MISMATCH` means
+someone is in the middle — stop.** The scan button disables itself where
+`BarcodeDetector` is missing; comparing by eye works everywhere.
+
 ## Troubleshooting
 
 - **"no broker" / manual pairing opens by itself** — the public PeerJS broker is

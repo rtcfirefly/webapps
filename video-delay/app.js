@@ -877,7 +877,12 @@ function newViewerPC(remoteId, cfg) {
   pc.addEventListener('track', e => { if (e.streams[0]) attachRemote(e.streams[0]); });
   pc.addEventListener('connectionstatechange', () => {
     updateHud();
-    if (pc.connectionState === 'connected') setSig('phone connected', 'ok');
+    if (pc.connectionState === 'connected') {
+      setSig('phone connected', 'ok');
+      setVfy('pending', 'Compare with the phone, or scan its code.');
+      refreshSas(pc, $('#vfyCode'), $('#vfyQr'));
+    }
+    if (['failed', 'closed'].includes(pc.connectionState)) { VFY.full = ''; setVfy('none', ''); }
     if (pc.connectionState === 'failed') { setSig('connection failed', 'bad'); toast('Connection failed — try again, or enable TURN'); }
     if (V.manual && ['failed', 'disconnected', 'closed'].includes(pc.connectionState) &&
         !$('#mvStart').disabled && store.get('paired', '') === 'manual') {
@@ -1052,6 +1057,7 @@ function newCameraPC(dst, cfg) {
   pc.addEventListener('connectionstatechange', () => {
     const s = pc.connectionState;
     setCamState(s, s === 'connected' ? 'ok' : (s === 'failed' ? 'bad' : ''));
+    if (s === 'connected') refreshSas(pc, $('#cVfyCode'), $('#cVfyQr'));
     if (s === 'failed') negotiate().catch(() => {});
   });
   applyBitrate();
@@ -1357,7 +1363,7 @@ async function manualAnswer(code) {
 /* PC side: read the phone's answer QR off a webcam. BarcodeDetector is absent
  * on some desktops (notably Chrome on Linux), so this is strictly an optional
  * accelerator -- the paste box beside it always works. */
-const SCAN = { on: false, stream: null, timer: 0 };
+const SCAN = { on: false, stream: null, timer: 0, video: null, btn: null, label: '' };
 
 async function scannerAvailable() {
   if (!('BarcodeDetector' in window)) return false;
@@ -1370,14 +1376,16 @@ function stopScan() {
   clearTimeout(SCAN.timer);
   if (SCAN.stream) SCAN.stream.getTracks().forEach(t => t.stop());
   SCAN.stream = null;
-  $('#mvCam').srcObject = null;
-  $('#mvCam').hidden = true;
-  $('#mvScan').textContent = '\uD83D\uDCF7 Scan the phone\u2019s QR';
+  if (SCAN.video) { SCAN.video.srcObject = null; SCAN.video.hidden = true; }
+  if (SCAN.btn) SCAN.btn.innerHTML = SCAN.label;
+  SCAN.video = SCAN.btn = null;
 }
 
-async function startScan() {
-  if (SCAN.on) { stopScan(); return; }
-  if (!await scannerAvailable()) { toast('No QR scanner in this browser — paste the code instead'); return; }
+/* One webcam scanner, two jobs: reading the phone's answer during manual
+ * pairing, and reading its safety code afterwards. */
+async function startScan({ video, btn, onResult }) {
+  if (SCAN.on) { const same = SCAN.btn === btn; stopScan(); if (same) return; }
+  if (!await scannerAvailable()) { toast('No QR scanner in this browser — compare the codes by eye instead'); return; }
   let det;
   try { det = new BarcodeDetector({ formats: ['qr_code'] }); }
   catch (e) { toast('Scanner unavailable: ' + e.name); return; }
@@ -1385,29 +1393,100 @@ async function startScan() {
     SCAN.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } });
   } catch (e) { dbg('scan', 'getUserMedia failed', e); toast('No webcam available: ' + e.name); return; }
 
-  const v = $('#mvCam');
-  v.srcObject = SCAN.stream; v.hidden = false;
-  await v.play().catch(() => {});
+  SCAN.video = video; SCAN.btn = btn; SCAN.label = btn.innerHTML;
+  video.srcObject = SCAN.stream; video.hidden = false;
+  await video.play().catch(() => {});
   SCAN.on = true;
-  $('#mvScan').textContent = 'Stop scanning';
-  dbg('scan', 'started');
+  btn.textContent = 'Stop scanning';
+  dbg('scan', 'started for', btn.id);
 
   const tick = async () => {
     if (!SCAN.on) return;
     try {
-      const found = await det.detect(v);
+      const found = await det.detect(video);
       if (found.length) {
         const text = found[0].rawValue;
         dbg('scan', 'detected', text.length + ' chars');
         stopScan();
-        $('#mvIn').value = text;
-        manualFinish(text).catch(e => toast('Could not use that code: ' + e.message));
+        onResult(text);
         return;
       }
     } catch (e) { dbg('scan', 'detect error', e); }
     SCAN.timer = setTimeout(tick, 150);   // a timer, not rAF: rAF stalls when the tab is not focused
   };
   tick();
+}
+
+/* ====================== PAIRING SECURITY (safety code) ======================
+ * Both ends hash the pair of DTLS certificate fingerprints actually in use for
+ * this connection. Those fingerprints are what the media is authenticated
+ * against, so anyone who sat in the middle of the signalling channel -- the
+ * exact attack the deterministic room id invites, since a guessed code lets
+ * someone register the viewer id first and answer in your place -- necessarily
+ * presents a different certificate, and the codes diverge.
+ *
+ * The QR carries the full 130-bit value so a scan is a real comparison. The
+ * printed groups are a shortening for comparing by eye when no camera is free. */
+
+const VFY = { full: '', short: '', state: 'unknown' };
+
+function b32(bytes, n) {
+  let bits = 0, val = 0, out = '';
+  for (const b of bytes) {
+    val = ((val << 8) | b) >>> 0; bits += 8;
+    while (bits >= 5) { out += ALPHA[(val >>> (bits - 5)) & 31]; bits -= 5; }
+    if (out.length >= n) break;
+  }
+  return out.slice(0, n);
+}
+
+function dtlsPrint(desc) {
+  const m = /^a=fingerprint:(\S+)[ \t]+(\S+)/mi.exec((desc && desc.sdp) || '');
+  return m ? m[1].toLowerCase() + ' ' + m[2].toUpperCase() : null;
+}
+
+async function computeSas(pc) {
+  if (!pc || !pc.localDescription || !pc.remoteDescription) return null;
+  const a = dtlsPrint(pc.localDescription), b = dtlsPrint(pc.remoteDescription);
+  if (!a || !b) return null;
+  // Sorted, so both ends derive the same value without agreeing who is who.
+  const material = 'video-delay/sas/v1|' + [a, b].sort().join('|');
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material)));
+  const full = b32(digest, 26);
+  return { full, short: full.slice(0, 12).replace(/(.{4})(.{4})(.{4})/, '$1 $2 $3') };
+}
+
+function setVfy(state, note) {
+  VFY.state = state;
+  const pill = $('#vfyPill');
+  if (pill) {
+    pill.textContent = { ok: 'verified', bad: 'MISMATCH', pending: 'not verified', none: 'not connected' }[state] || state;
+    pill.className = 'pill' + (state === 'ok' ? ' ok' : state === 'bad' ? ' bad' : '');
+  }
+  if (note !== undefined) { const n = $('#vfyNote'); if (n) n.textContent = note; }
+  dbg('verify', state, note || '');
+}
+
+async function refreshSas(pc, codeEl, qrEl) {
+  const sas = await computeSas(pc);
+  if (!sas) { if (codeEl) codeEl.textContent = '— — —'; if (qrEl) qrEl.hidden = true; return null; }
+  VFY.full = sas.full; VFY.short = sas.short;
+  if (codeEl) codeEl.textContent = sas.short;
+  if (qrEl) VDQR.render(sas.full, qrEl, 300);
+  dbg('verify', 'safety code', sas.short);
+  return sas;
+}
+
+function verifyScanned(text) {
+  const got = (text || '').trim().toUpperCase();
+  if (!VFY.full) { toast('No safety code yet — connect first'); return; }
+  if (got === VFY.full) {
+    setVfy('ok', 'The phone reported the same fingerprints. Nobody is in the middle.');
+    toast('Pairing verified \u2713');
+  } else {
+    setVfy('bad', 'Scanned ' + got.slice(0, 12) + '…, expected ' + VFY.full.slice(0, 12) + '…');
+    toast('MISMATCH — do not trust this connection');
+  }
 }
 
 /* ============================== WIRING ============================== */
@@ -1544,11 +1623,21 @@ function wire() {
   /* --- manual pairing, viewer side --- */
   $('#mvStart').onclick = manualOffer;
   $('#mvOfferCopy').onclick = () => navigator.clipboard.writeText($('#mvOffer').value).then(() => toast('Offer code copied'), () => toast('Copy failed'));
-  $('#mvScan').onclick = () => startScan().catch(e => toast('Scanner failed: ' + e.message));
+  $('#mvScan').onclick = () => startScan({
+    video: $('#mvCam'), btn: $('#mvScan'),
+    onResult: text => { $('#mvIn').value = text; manualFinish(text).catch(e => toast('Could not use that code: ' + e.message)); },
+  }).catch(e => toast('Scanner failed: ' + e.message));
+
+  $('#vfyScan').onclick = () => startScan({
+    video: $('#vfyCam'), btn: $('#vfyScan'), onResult: verifyScanned,
+  }).catch(e => toast('Scanner failed: ' + e.message));
+  $('#vfyRefresh').onclick = () => refreshSas(V.pc, $('#vfyCode'), $('#vfyQr'));
   $('#mvGo').onclick = () => manualFinish($('#mvIn').value).catch(e => toast('Could not read that code: ' + e.message));
   scannerAvailable().then(ok => {
     $('#mvScan').disabled = !ok;
+    $('#vfyScan').disabled = !ok;
     $('#mvScanNote').textContent = ok ? '' : 'no QR scanner in this browser — paste instead';
+    if (!ok) $('#vfyNote').textContent = 'No QR scanner in this browser — compare the letters by eye instead.';
   });
 
   /* --- camera --- */

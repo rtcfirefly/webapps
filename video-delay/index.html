@@ -92,6 +92,21 @@
     </div>
   </div>
 
+  <details class="adv" id="verify">
+    <summary>Pairing security <span id="vfyPill" class="pill">not connected</span></summary>
+    <p class="pairtxt">Both devices derive this from the two DTLS certificate fingerprints actually
+      in use. If anyone had come between you on the signalling channel they would have to present a
+      different certificate, and the codes would differ.</p>
+    <div class="sas" id="vfyCode">— — —</div>
+    <div id="vfyQr" class="qrbox"></div>
+    <div class="grp">
+      <button id="vfyScan">📷 Scan the phone's code</button>
+      <button id="vfyRefresh" class="sm">Recompute</button>
+    </div>
+    <video id="vfyCam" playsinline muted hidden></video>
+    <div id="vfyNote" class="pairtxt"></div>
+  </details>
+
   <details class="adv" id="vManual">
     <summary>Pair manually (no signalling server)</summary>
     <div class="row">
@@ -162,6 +177,14 @@
         <span id="camState" class="pill">…</span>
         <button id="camLog" title="Debug log">🐞</button>
       </div>
+      <details class="adv" id="cVerify">
+        <summary>Pairing security</summary>
+        <div class="sas" id="cVfyCode">— — —</div>
+        <div id="cVfyQr" class="qrbox"></div>
+        <p class="pairtxt">Hold this up to the PC's webcam and press
+          <b>Scan the phone's code</b> there, or just check the letters match.</p>
+      </details>
+
       <button id="camStop" class="link">disconnect</button>
     </div>
 
