@@ -622,12 +622,13 @@ async function handleOffer(m) {
 async function startViewer() {
   show('viewer');
   setDelay(store.get('delay', 30), false);
-  renderJoin(store.get('room', '') || newRoom());
+  renderJoin(store.get('room', '') || newRoom(), 'startup');
   updateOverlay();
   await connectViewerSignal();
 }
 
-function renderJoin(room) {
+function renderJoin(room, why) {
+  if (V.room && V.room !== room) dbg('viewer', 'ROOM CODE CHANGED', V.room, '->', room, '(' + (why || 'unknown') + ')');
   V.room = room; store.set('room', room);
   $('#roomCode').textContent = room;
   const url = location.origin + location.pathname + '#c=' + room;
@@ -652,7 +653,7 @@ async function connectViewerSignal() {
       // reaped yet. Retry the same code before changing what the PC shows --
       // minting a new code silently invalidates whatever the phone was told.
       if (++vTaken <= 4) { setSig('code busy \u2014 retrying\u2026'); vTimer = setTimeout(connectViewerSignal, 2000); return; }
-      vTaken = 0; renderJoin(newRoom()); vTimer = setTimeout(connectViewerSignal, 300); return;
+      vTaken = 0; renderJoin(newRoom(), 'gave up after 4 ID-TAKEN'); vTimer = setTimeout(connectViewerSignal, 300); return;
     }
     setSig('no broker: ' + e.message, 'bad');
     $('#vManual').open = true;
@@ -1157,7 +1158,7 @@ function wire() {
     try { await navigator.clipboard.writeText($('#joinUrl').dataset.url); toast('Link copied'); }
     catch { toast('Copy failed — select the link manually'); }
   };
-  $('#newRoom').onclick = () => { renderJoin(newRoom()); connectViewerSignal(); };
+  $('#newRoom').onclick = () => { renderJoin(newRoom(), 'New code button'); connectViewerSignal(); };
 
   /* --- advanced --- */
   $('#iceCfg').value = store.get('ice', '');
