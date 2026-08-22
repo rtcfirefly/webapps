@@ -142,8 +142,15 @@ function logHeader() {
 
 const DEFAULT_ICE = {
   iceServers: [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.l.google.com:19302' },
+    // stun1..stun4.l.google.com resolve to the same IPv4 and IPv6 addresses as
+    // stun.l.google.com -- one box, so listing them buys no redundancy, only
+    // duplicate gathering work. Cloudflare's is the only anonymous STUN with a
+    // primary-source "free and unlimited" guarantee; port 53 survives networks
+    // that drop 3478. Nextcloud's is a third operator, on 443, for the worst
+    // firewalls.
+    { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.cloudflare.com:53'] },
+    { urls: 'stun:stun.nextcloud.com:443' },
     // No TURN by default. The openrelay.metered.ca servers that used to be here
     // no longer resolve at all (every URL returned ICE error 701, "host lookup
     // received error", 2026-08-22) -- they only added ~50 failed lookups and a
@@ -325,7 +332,7 @@ function makeLine(name, bitrate) {
     live: true,     // false while the user is scrubbing back through the buffer
     frozen: false,
     timer: 0, restart: 0, lastLog: 0,
-    lastAppend: 0, everDecoded: false, wantEdge: false,
+    lastAppend: 0, everDecoded: false, watchdogDone: false, wantEdge: false,
     lastCapture: 0, lastSeek: 0, lastTime: -1, lastMove: 0,
     firstRelease: 0,
     bypass: false,  // true if we gave up and fell back to undelayed playback
@@ -355,11 +362,19 @@ function stopDelay(d) {
     d.video.removeEventListener('playing', d.onDecoded);
   }
   if (d.objUrl) { try { URL.revokeObjectURL(d.objUrl); } catch {} d.objUrl = ''; }
+  // stop() flushes one last dataavailable ASYNCHRONOUSLY, after this function
+  // has cleared d.queue and after startDelay has already built the replacement
+  // recorder. That orphan is a bare WebM cluster with no init segment, so it
+  // became the first append of the new pipeline and killed it with "media
+  // segment received without an init segment" -- a recovery path that instantly
+  // re-bypassed. Detach before stopping.
+  if (d.rec) { d.rec.ondataavailable = null; d.rec.onerror = null; }
   try { d.rec && d.rec.state !== 'inactive' && d.rec.stop(); } catch {}
   try { d.ms && d.ms.readyState === 'open' && d.ms.endOfStream(); } catch {}
   if (d.video) { d.video.removeAttribute('src'); d.video.srcObject = null; try { d.video.load(); } catch {} }
   d.rec = d.ms = d.sb = null; d.queue = []; d.pending = [];
-  d.live = true; d.frozen = false; d.bypass = false; d.firstRelease = 0; d.everDecoded = false;
+  d.live = true; d.frozen = false; d.bypass = false; d.firstRelease = 0;
+  d.everDecoded = false; d.watchdogDone = false;
   d.lastAppend = 0; d.lastSeek = 0; d.lastTime = -1; d.lastMove = 0;
   d.wantEdge = false; d.lastCapture = 0;
 }
@@ -374,6 +389,11 @@ function bypassToLive(d, why) {
   d.video.removeAttribute('src');
   d.video.srcObject = d.stream;
   d.video.play().catch(() => {});
+  // updateOverlay/updateHud only run from pump(), which the clearInterval above
+  // just killed -- and the watchdog is the last statement in pump(), so this
+  // tick's overlay pass already ran with bypass still false. Without this the
+  // user reads "filling the 30s buffer..." over live video, forever.
+  if (d === D) { updateOverlay(); updateHud(); }
   toast(d.name + ': delay buffer unavailable (' + why + ') — showing live video');
 }
 
@@ -416,7 +436,7 @@ function startDelay(d, stream, video) {
   // Bound once and removed in stopDelay: re-added per start, these leaked a
   // pair on every reconnect and every bypass-recovery restart.
   d.onDecoded = (ev) => {
-    if (!d.everDecoded) { d.everDecoded = true; dbg(d.name, 'first decode (' + ev.type + ') - startup watchdog disarmed'); }
+    if (!d.everDecoded) { d.everDecoded = true; d.watchdogDone = true; dbg(d.name, 'first decode (' + ev.type + ') - startup watchdog disarmed'); }
   };
   video.addEventListener('loadeddata', d.onDecoded);
   video.addEventListener('playing', d.onDecoded);
@@ -438,9 +458,17 @@ function startDelay(d, stream, video) {
 
 function pump(d) {
   const t = now();
+  // A chunk whose arrayBuffer() never settles would otherwise stall the whole
+  // line forever, silently. Give up on it after 5s past its due time.
+  const head = d.queue[0];
+  if (head && !head.buf && (t - head.t) > d.delayMs + 5000) {
+    dbg(d.name, 'head chunk never resolved after 5s - discarding to unblock the line');
+    head.buf = new ArrayBuffer(0);
+  }
   while (d.queue.length && d.queue[0].buf && (t - d.queue[0].t) >= d.delayMs) {
     const c = d.queue.shift();
     if (c.buf.byteLength) { d.pending.push(c.buf); d.lastCapture = c.t; }
+    else dbg(d.name, 'dropped an empty chunk - the stream now has a hole here');
     if (!d.firstRelease) d.firstRelease = t;
   }
   step(d);
@@ -469,10 +497,13 @@ function pump(d) {
   // and raising the delay deliberately starves the buffer, which is precisely
   // the condition that drops readyState. Starving on purpose is not a codec
   // failure.
-  if (d.video && d.video.readyState >= 2) d.everDecoded = true;
+  // One-shot by construction rather than by three conjoined conditions staying
+  // correct forever: "did the codec pairing ever work" is answerable once.
+  if (d.video && d.video.readyState >= 2) { d.everDecoded = true; d.watchdogDone = true; }
   const withholding = d.queue.length > 0 && (t - d.queue[0].t) < d.delayMs;
-  if (d.firstRelease && !d.bypass && !d.everDecoded && !withholding &&
+  if (!d.watchdogDone && d.firstRelease && !d.bypass && !withholding &&
       t - d.firstRelease > 6000 && d.video.readyState < 2) {
+    d.watchdogDone = true;
     bypassToLive(d, 'nothing decodable in the first 6s');
   }
 }
@@ -664,8 +695,20 @@ function setSig(text, cls) {
   el.className = 'pill' + (cls ? ' ' + cls : '');
 }
 
+const QUEUE_BUDGET = 220 * 1048576;   // bytes of undelivered chunks we will hold
+
 function setDelay(sec, persist = true) {
   sec = clamp(Math.round(sec) || 0, 0, 600);
+  // The queues are the delay. At 3 Mb/s plus the webcam's 1.2 Mb/s, ten minutes
+  // is ~315 MB of ArrayBuffers and a killed tab, so cap the delay by a byte
+  // budget rather than discovering the limit the hard way.
+  const bytesPerSec = (LINES.filter(d => d.stream).reduce((n, d) => n + d.bitrate, 0) || 3_000_000) / 8;
+  const maxSec = Math.floor(QUEUE_BUDGET / bytesPerSec);
+  if (sec > maxSec) {
+    dbg('delay', 'clamped', sec + 's ->', maxSec + 's by the ' + Math.round(QUEUE_BUDGET / 1048576) + ' MB queue budget');
+    if (!setDelay.warned) { setDelay.warned = true; toast('Delay capped at ' + maxSec + 's — beyond that the buffer would exceed ' + Math.round(QUEUE_BUDGET / 1048576) + ' MB'); }
+    sec = maxSec;
+  }
   const changed = D.delayMs !== sec * 1000;
   if (changed) dbg('delay', 'set to', sec + 's');
   // One delay for both feeds: the point of the self-view is to sit beside the
@@ -940,6 +983,14 @@ async function connectViewerSignal() {
       const c = m.payload.candidate || m.payload;
       if (V.pc && V.pc.remoteDescription) V.pc.addIceCandidate(c).catch(() => {});
       else V.pendingCands.push(c);
+    }
+    else if (m.type === 'EXPIRE') {
+      // The broker could not deliver to m.src. On a multi-region broker whose
+      // peer registry is per-process this is what a cross-node pair looks like:
+      // both ends OPEN, nothing relayed. Compare the "broker node" lines in the
+      // two devices' logs.
+      dbg('viewer', 'EXPIRE for', m.src, '- broker could not deliver');
+      setSig('broker could not reach the phone', 'bad');
     }
   });
   sig.addEventListener('down', () => {
@@ -1385,6 +1436,16 @@ function wire() {
   addEventListener('unhandledrejection', e => dbg('!! unhandled rejection:', fmtArg(e.reason)));
   dbg('boot', navigator.userAgent);
   dbg('boot', 'secure=' + window.isSecureContext, 'broker=' + SIGNAL_URL, 'MSImpl=' + (MSImpl ? MSImpl.name : 'none'));
+  // The public broker runs a multi-region build whose peer registry is a bare
+  // per-process Map with no cross-node routing, so two peers can both be OPEN
+  // on different nodes and never see each other. If the two devices report
+  // different nodes, that is the whole story and no client change fixes it.
+  try {
+    const root = SIGNAL_URL.replace(/^ws/, 'http').replace(/\/[^/]*$/, '/');
+    fetch(root).then(r => r.json())
+      .then(j => dbg('boot', 'broker node =', j.location || '(not reported)', JSON.stringify(j).slice(0, 120)))
+      .catch(e => dbg('boot', 'broker node probe failed (CORS or offline):', e.message));
+  } catch {}
 
   /* --- home --- */
   $('#goViewer').onclick = () => { location.hash = '#v'; startViewer(); };
