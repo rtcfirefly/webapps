@@ -321,6 +321,7 @@ const D = {
   frozen: false,
   timer: 0,
   lastAppend: 0,
+  everDecoded: false,
   lastSeek: 0,
   lastTime: -1,
   lastMove: 0,
@@ -344,7 +345,7 @@ function stopDelay() {
   try { D.ms && D.ms.readyState === 'open' && D.ms.endOfStream(); } catch {}
   if (D.video) { D.video.removeAttribute('src'); D.video.srcObject = null; try { D.video.load(); } catch {} }
   D.rec = D.ms = D.sb = null; D.queue = []; D.pending = [];
-  D.live = true; D.frozen = false; D.bypass = false; D.firstRelease = 0;
+  D.live = true; D.frozen = false; D.bypass = false; D.firstRelease = 0; D.everDecoded = false;
   D.lastAppend = 0; D.lastSeek = 0; D.lastTime = -1; D.lastMove = 0;
 }
 
@@ -395,6 +396,12 @@ function startDelay(stream, video) {
     video.src = URL.createObjectURL(ms);
   }
 
+  for (const ev of ['loadeddata', 'playing']) {
+    video.addEventListener(ev, () => {
+      if (!D.everDecoded) { D.everDecoded = true; dbg('delay', 'first decode (' + ev + ') - startup watchdog disarmed'); }
+    });
+  }
+
   ms.addEventListener('sourceopen', () => {
     let sb;
     try { sb = ms.addSourceBuffer(rec.mimeType || mime); }
@@ -435,10 +442,21 @@ function pump() {
       'overlay=' + ($('#overlay').hidden ? 'hidden' : 'SHOWN'));
   }
 
-  // If chunks have been flowing for a while but nothing ever decoded, the
-  // recorder/MSE codec pairing is lying to us. Show live video instead.
-  if (D.firstRelease && !D.bypass && t - D.firstRelease > 6000 && D.video.readyState < 2) {
-    bypassToLive('nothing decodable');
+  // Startup watchdog: if the recorder/MSE codec pairing turns out to be lying,
+  // show live video rather than a black rectangle.
+  //
+  // This must only ever fire BEFORE anything has decoded. firstRelease is set
+  // once and never reset, so without the everDecoded guard the test decayed
+  // into a bare "readyState < 2" that stayed armed for the whole session --
+  // and raising the delay deliberately starves the buffer, which is precisely
+  // the condition that drops readyState. Raising the delay from 0 therefore
+  // bypassed straight to live and made every delay control inert, which is
+  // exactly the reported bug. Starving on purpose is not a codec failure.
+  if (D.video && D.video.readyState >= 2) D.everDecoded = true;
+  const withholding = D.queue.length > 0 && (t - D.queue[0].t) < D.delayMs;
+  if (D.firstRelease && !D.bypass && !D.everDecoded && !withholding &&
+      t - D.firstRelease > 6000 && D.video.readyState < 2) {
+    bypassToLive('nothing decodable in the first 6s');
   }
 }
 
@@ -496,7 +514,7 @@ function maintain() {
 
 /* ============================== VIEWER UI ============================== */
 
-const V = { sig: null, pc: null, room: '', peer: null, pendingCands: [], stats: null, statsTimer: 0 };
+const V = { sig: null, pc: null, room: '', peer: null, manual: false, pendingCands: [], stats: null, statsTimer: 0 };
 
 function show(id) {
   for (const s of document.querySelectorAll('.view')) s.hidden = (s.id !== id);
@@ -511,8 +529,18 @@ function setSig(text, cls) {
 
 function setDelay(sec, persist = true) {
   sec = clamp(Math.round(sec) || 0, 0, 600);
-  if (D.delayMs !== sec * 1000) dbg('delay', 'set to', sec + 's');
+  const changed = D.delayMs !== sec * 1000;
+  if (changed) dbg('delay', 'set to', sec + 's');
   D.delayMs = sec * 1000;
+  // Bypass used to be terminal: once it fired, only a reload brought the delay
+  // back. Touching the delay is an unambiguous request for a delayed picture,
+  // so take it as a cue to rebuild the pipeline.
+  if (changed && D.bypass && D.stream && D.video) {
+    dbg('delay', 'delay changed while bypassed - restarting the pipeline');
+    const s = D.stream, v = D.video;
+    clearTimeout(setDelay._restart);
+    setDelay._restart = setTimeout(() => startDelay(s, v), 250);
+  }
   $('#delay').value = clamp(sec, 0, 180);
   $('#delayNum').value = sec;
   if (persist) store.set('delay', sec);
@@ -610,6 +638,14 @@ function newViewerPC(remoteId, cfg) {
 }
 
 async function handleOffer(m) {
+  // Manual pairing leaves this connection in have-local-offer, waiting for a
+  // scanned answer. A broker OFFER arriving in that window would replace it and
+  // leave the scan failing with "wrong state: stable".
+  if (V.manual && V.pc && ['have-local-offer', 'stable'].includes(V.pc.signalingState) &&
+      ['new', 'connecting', 'connected'].includes(V.pc.connectionState)) {
+    dbg('viewer', 'ignoring broker OFFER from', m.src, '- a manual pairing is in progress');
+    return;
+  }
   setSig('phone found \u2014 negotiating\u2026');
   const early = V.pendingCands;          // candidates that beat the offer here
   const pc = newViewerPC(m.src);
@@ -945,6 +981,7 @@ async function manualOffer() {
   const btn = $('#mvStart');
   btn.disabled = true; btn.textContent = 'gathering…';
   try {
+    V.manual = true;
     const pc = newViewerPC(null, MANUAL_ICE);
     pc.addTransceiver('video', { direction: 'recvonly' });
     pc.addTransceiver('audio', { direction: 'recvonly' });
@@ -977,6 +1014,23 @@ async function manualFinish(text) {
   const a = await unpack(text);
   if (!a || a.k !== 'a') { toast('That does not look like an answer code'); return false; }
   if (!V.pc) { toast('Show the pairing QR first'); return false; }
+
+  // An answer can only be applied to a connection still holding its offer.
+  // Anything else -- the answer applied twice, or a broker OFFER having
+  // replaced this connection underneath us -- lands here as
+  // "Called in wrong state: stable", which says nothing useful to a user.
+  const st = V.pc.signalingState;
+  dbg('manual', 'applying answer, signalingState =', st, 'connectionState =', V.pc.connectionState);
+  if (st !== 'have-local-offer') {
+    if (V.pc.remoteDescription && ['connected', 'connecting'].includes(V.pc.connectionState)) {
+      toast('Already paired \u2014 nothing more to do');
+      return true;
+    }
+    toast('That pairing is no longer current (state: ' + st + ') \u2014 press "Show pairing QR" again');
+    dbg('manual', 'refused: needed have-local-offer, had', st);
+    return false;
+  }
+
   logSdp('manual answer', { type: 'answer', sdp: a.s });
   await V.pc.setRemoteDescription({ type: 'answer', sdp: a.s });
   toast('Answer accepted \u2014 connecting');
@@ -1161,7 +1215,7 @@ function wire() {
     try { await navigator.clipboard.writeText($('#joinUrl').dataset.url); toast('Link copied'); }
     catch { toast('Copy failed — select the link manually'); }
   };
-  $('#newRoom').onclick = () => { renderJoin(newRoom(), 'New code button'); connectViewerSignal(); };
+  $('#newRoom').onclick = () => { V.manual = false; renderJoin(newRoom(), 'New code button'); connectViewerSignal(); };
 
   /* --- advanced --- */
   $('#iceCfg').value = store.get('ice', '');
