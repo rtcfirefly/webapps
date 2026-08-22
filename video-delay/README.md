@@ -97,6 +97,26 @@ HTTPS, so that's handled; if you serve it locally, `localhost` also counts.
 Put the **viewer** on Chrome or Firefox. The camera side is ordinary WebRTC and
 works anywhere.
 
+## Debug log
+
+Both pages have a **🐞 Debug log** panel at the bottom (also reachable from the
+🐞 button in the viewer toolbar / camera controls). **Copy log** puts the whole
+thing on the clipboard, **Download** saves it as a text file — either is fine to
+paste somewhere for diagnosis.
+
+It records the broker socket lifecycle (including the WebSocket close code and
+reason, which is the thing that says *why* a connection dropped), every
+signalling message with its type and size, all four `RTCPeerConnection` state
+machines, every ICE candidate, `icecandidateerror` events with the STUN/TURN URL
+that failed, the selected candidate pair once connected (so you can see whether
+it went direct or via TURN), the chosen recorder/MSE codec, and a delay-pipeline
+summary every 5 s.
+
+**IP addresses are reduced to their first octet** (`192.x.x.x`, `mdns.local`,
+`ipv6`) — candidate type and protocol are what diagnose a connection, the rest is
+just your network. Full SDP is *off* by default for the same reason; the
+checkbox in the panel turns it on if it's genuinely needed.
+
 ## Troubleshooting
 
 - **"no broker" / manual pairing opens by itself** — the public PeerJS broker is

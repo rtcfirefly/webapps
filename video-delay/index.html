@@ -52,6 +52,7 @@
       <button id="btnPip" title="Live (undelayed) thumbnail (P)">Live&nbsp;PiP</button>
       <button id="btnMute" title="Audio on/off (U)">🔇</button>
       <button id="btnFs" title="Fullscreen (F)">⛶</button>
+      <button id="btnLog" title="Debug log">🐞</button>
     </div>
   </div>
 
@@ -123,6 +124,7 @@
           <option value="8000000">8 Mbps</option>
         </select>
         <span id="camState" class="pill">…</span>
+        <button id="camLog" title="Debug log">🐞</button>
       </div>
       <button id="camStop" class="link">disconnect</button>
     </div>
@@ -144,6 +146,17 @@
     <button class="link back" data-back>← back</button>
   </div>
 </section>
+
+<details class="adv dbg" id="dbg">
+  <summary>🐞 Debug log</summary>
+  <pre id="dbgPre"></pre>
+  <div class="grp">
+    <button id="dbgCopy" class="sm">Copy log</button>
+    <button id="dbgSave" class="sm">Download</button>
+    <button id="dbgClear" class="sm">Clear</button>
+    <label class="chk"><input type="checkbox" id="dbgSdp"> include full SDP <span class="warn">(contains IP addresses)</span></label>
+  </div>
+</details>
 
 <div id="toast" hidden></div>
 <script src="app.js"></script>

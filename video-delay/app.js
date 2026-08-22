@@ -30,6 +30,114 @@ function toast(msg, ms = 3400) {
   toast._t = setTimeout(() => { t.hidden = true; }, ms);
 }
 
+/* --------------------------------------------------------------- debug  */
+/* An on-screen ring buffer, so a phone with no devtools can still produce
+ * something worth reading. Addresses are reduced to their first octet: the
+ * candidate type and protocol are what diagnose a connection, the rest is
+ * just the user's network splashed into a pastebin. */
+
+const T0 = now();
+const LOG = [];
+let dbgPre = null;
+
+function fmtArg(a) {
+  if (typeof a === 'string') return a;
+  if (a instanceof Error) return a.name + ': ' + a.message;
+  try { const s = JSON.stringify(a); return s && s.length > 400 ? s.slice(0, 400) + '\u2026' : s; }
+  catch { return String(a); }
+}
+
+function dbg(...args) {
+  const t = ((now() - T0) / 1000).toFixed(2).padStart(8);
+  const line = t + '  ' + args.map(fmtArg).join(' ');
+  LOG.push(line);
+  if (LOG.length > 800) LOG.splice(0, LOG.length - 800);
+  if (dbgPre) {
+    dbgPre.textContent = LOG.slice(-250).join('\n');
+    dbgPre.scrollTop = dbgPre.scrollHeight;
+  }
+  console.log('[vd]' + line);
+}
+
+function redactAddr(a) {
+  if (!a) return '?';
+  if (/\.local$/i.test(a)) return 'mdns.local';
+  if (a.includes(':')) return 'ipv6';
+  const p = a.split('.');
+  return p.length === 4 ? p[0] + '.x.x.x' : 'addr';
+}
+
+function candInfo(c) {
+  const typ = c.type || ((/ typ (\w+)/.exec(c.candidate || '') || [])[1]) || '?';
+  return typ + ' ' + (c.protocol || '?') + ' ' + redactAddr(c.address) +
+    (c.relatedAddress ? ' via ' + redactAddr(c.relatedAddress) : '') +
+    (c.url ? ' [' + c.url + ']' : '');
+}
+
+function sdpSummary(d) {
+  const sdp = (d && d.sdp) || '';
+  const mids = (sdp.match(/^m=(\w+)/gm) || []).map(s => s.slice(2));
+  const cands = (sdp.match(/^a=candidate:/gm) || []).length;
+  return d.type + ' ' + sdp.length + 'B mlines=[' + mids.join(',') + '] inline-candidates=' + cands;
+}
+
+function logSdp(tag, d) {
+  dbg(tag, sdpSummary(d));
+  const box = $('#dbgSdp');
+  if (box && box.checked) dbg(tag, 'full sdp:\n' + d.sdp);
+}
+
+function logPC(pc, tag) {
+  pc.addEventListener('iceconnectionstatechange', () => dbg(tag, 'iceConnectionState =', pc.iceConnectionState));
+  pc.addEventListener('icegatheringstatechange', () => dbg(tag, 'iceGatheringState =', pc.iceGatheringState));
+  pc.addEventListener('signalingstatechange', () => dbg(tag, 'signalingState =', pc.signalingState));
+  pc.addEventListener('connectionstatechange', () => {
+    dbg(tag, 'connectionState =', pc.connectionState);
+    if (pc.connectionState === 'connected') logSelectedPair(pc, tag);
+  });
+  pc.addEventListener('icecandidate', e => dbg(tag, 'local candidate:', e.candidate ? candInfo(e.candidate) : '(gathering complete)'));
+  pc.addEventListener('icecandidateerror', e =>
+    dbg(tag, 'ICE ERROR code=' + e.errorCode, e.errorText || '', 'url=' + (e.url || '?')));
+}
+
+async function logSelectedPair(pc, tag) {
+  try {
+    const rep = await pc.getStats();
+    let pair = null;
+    rep.forEach(r => { if (r.type === 'transport' && r.selectedCandidatePairId) pair = rep.get(r.selectedCandidatePairId); });
+    if (!pair) rep.forEach(r => { if (r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated) pair = r; });
+    if (!pair) { dbg(tag, 'no selected candidate pair yet'); return; }
+    const l = rep.get(pair.localCandidateId), r = rep.get(pair.remoteCandidateId);
+    const d = c => c ? c.candidateType + '/' + (c.protocol || '?') + (c.relayProtocol ? '(' + c.relayProtocol + ')' : '') : '?';
+    dbg(tag, 'SELECTED PAIR:', d(l), '<->', d(r),
+      'rtt=' + (pair.currentRoundTripTime != null ? Math.round(pair.currentRoundTripTime * 1000) + 'ms' : '?'),
+      l && l.candidateType === 'relay' ? '(via TURN)' : '');
+  } catch (e) { dbg(tag, 'getStats failed', e); }
+}
+
+function logHeader() {
+  const cap = [];
+  for (const t of ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/mp4;codecs=avc1.42E01E']) {
+    const r = window.MediaRecorder && MediaRecorder.isTypeSupported(t);
+    const m = MSImpl && MSImpl.isTypeSupported(t);
+    cap.push(t.replace('video/', '').replace(';codecs=', ':') + '=' + (r ? 'R' : '-') + (m ? 'M' : '-'));
+  }
+  return [
+    'video-delay debug log',
+    'when      : ' + new Date().toISOString(),
+    'page      : ' + location.href,
+    'ua        : ' + navigator.userAgent,
+    'secure    : ' + window.isSecureContext + '   screen: ' + screen.width + 'x' + screen.height + '@' + devicePixelRatio,
+    'broker    : ' + SIGNAL_URL,
+    'ice       : ' + (store.get('ice', '') ? 'custom' : 'default (google stun + openrelay turn)'),
+    'MSImpl    : ' + (MSImpl ? MSImpl.name : 'none') + '   MediaRecorder: ' + (window.MediaRecorder ? 'yes' : 'no'),
+    'codecs    : ' + cap.join('  ') + '   (R=MediaRecorder M=MediaSource)',
+    'room      : ' + (V.room || C.room || '-'),
+    'delay     : ' + (D.delayMs / 1000) + 's   bypass=' + D.bypass + '   mime=' + (D.mime || '-'),
+    ''.padEnd(60, '-'),
+  ].join('\n');
+}
+
 /* ----------------------------------------------------------------- ICE  */
 
 const DEFAULT_ICE = {
@@ -66,30 +174,41 @@ class Signal extends EventTarget {
     return new Promise((resolve, reject) => {
       const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
       const url = `${SIGNAL_URL}?key=peerjs&id=${encodeURIComponent(this.id)}&token=${token}&version=1.5.4`;
+      dbg('sig', 'opening as', this.id, 'to', SIGNAL_URL);
       let ws;
-      try { ws = this.ws = new WebSocket(url); } catch (e) { reject(e); return; }
+      try { ws = this.ws = new WebSocket(url); } catch (e) { dbg('sig', 'construct failed', e); reject(e); return; }
       let settled = false, live = false;
-      const fail = (e) => { if (settled) return; settled = true; clearTimeout(timer); reject(e); try { ws.close(); } catch {} };
+      const fail = (e) => { if (settled) return; settled = true; clearTimeout(timer); dbg('sig', 'open failed:', e.message); reject(e); try { ws.close(); } catch {} };
 
       const timer = setTimeout(() => fail(new Error('signalling timed out')), 12000);
 
       ws.onopen = () => { this.hb = setInterval(() => this.raw({ type: 'HEARTBEAT' }), 5000); };
       ws.onerror = () => fail(new Error('signalling connection failed'));
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         clearInterval(this.hb);
+        dbg('sig', 'socket closed code=' + ev.code, 'reason=' + (ev.reason || '(none)'), 'clean=' + ev.wasClean, 'wasOpen=' + live);
         if (!settled) fail(new Error('signalling closed'));
         else if (live) { live = false; this.dispatchEvent(new Event('down')); }
       };
       ws.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch { return; }
-        if (m.type === 'OPEN') { clearTimeout(timer); settled = true; live = true; resolve(); return; }
+        if (m.type === 'OPEN') { clearTimeout(timer); settled = true; live = true; dbg('sig', 'OPEN as', this.id); resolve(); return; }
         if (m.type === 'ID-TAKEN') { fail(new Error('ID-TAKEN')); return; }
+        dbg('sig', 'recv', m.type, 'from', m.src || '(server)', ev.data.length + 'B');
         this.dispatchEvent(new CustomEvent('msg', { detail: m }));
       };
     });
   }
 
-  raw(o) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(o)); }
+  raw(o) {
+    const s = JSON.stringify(o);
+    if (!this.ws || this.ws.readyState !== 1) {
+      if (o.type !== 'HEARTBEAT') dbg('sig', 'DROPPED send', o.type, '- socket state', this.ws ? this.ws.readyState : 'null');
+      return;
+    }
+    if (o.type !== 'HEARTBEAT') dbg('sig', 'send', o.type, 'to', o.dst, s.length + 'B');
+    this.ws.send(s);
+  }
   send(type, dst, payload) { this.raw({ type, dst, payload }); }
   close() { clearInterval(this.hb); try { this.ws && this.ws.close(); } catch {} this.ws = null; }
 }
@@ -182,6 +301,7 @@ function stopDelay() {
 
 function bypassToLive(why) {
   if (D.bypass) return;
+  dbg('delay', 'BYPASS to live video:', why);
   D.bypass = true;
   clearInterval(D.timer); D.timer = 0;
   try { D.rec && D.rec.state !== 'inactive' && D.rec.stop(); } catch {}
@@ -195,7 +315,9 @@ function startDelay(stream, video) {
   stopDelay();
   D.stream = stream; D.video = video;
 
+  dbg('delay', 'remote stream: video=' + stream.getVideoTracks().length, 'audio=' + stream.getAudioTracks().length);
   const mime = pickMime(stream.getAudioTracks().length > 0);
+  dbg('delay', 'chosen mime =', mime || '(none)');
   if (!mime) { bypassToLive('no MediaRecorder/MediaSource codec in common'); return; }
   D.mime = mime;
 
@@ -228,7 +350,8 @@ function startDelay(stream, video) {
     let sb;
     try { sb = ms.addSourceBuffer(rec.mimeType || mime); }
     catch (e) { bypassToLive('addSourceBuffer: ' + e.name); return; }
-    try { sb.mode = 'sequence'; } catch {}
+    dbg('delay', 'sourceopen, SourceBuffer for', rec.mimeType || mime);
+    try { sb.mode = 'sequence'; } catch (e) { dbg('delay', 'sb.mode=sequence rejected', e); }
     sb.addEventListener('updateend', () => { step(); maintain(); });
     sb.addEventListener('error', () => bypassToLive('source buffer error'));
     D.sb = sb;
@@ -249,6 +372,19 @@ function pump() {
   maintain();
   updateOverlay();
   updateHud();
+
+  if (t - (pump.last || 0) > 5000) {
+    pump.last = t;
+    const v = D.video, sb = D.sb;
+    const b = sb && sb.buffered.length
+      ? sb.buffered.start(0).toFixed(1) + '-' + sb.buffered.end(sb.buffered.length - 1).toFixed(1) : 'none';
+    dbg('delay', 'queue=' + D.queue.length, 'pending=' + D.pending.length, 'buffered=' + b,
+      't=' + (v ? v.currentTime.toFixed(1) : '?'), 'rs=' + (v ? v.readyState : '?'),
+      'paused=' + (v ? v.paused : '?'), 'set=' + (D.delayMs / 1000) + 's',
+      'live=' + D.live, 'frozen=' + D.frozen,
+      'sinceAppend=' + (D.lastAppend ? Math.round(t - D.lastAppend) + 'ms' : '-'),
+      'overlay=' + ($('#overlay').hidden ? 'hidden' : 'SHOWN'));
+  }
 
   // If chunks have been flowing for a while but nothing ever decoded, the
   // recorder/MSE codec pairing is lying to us. Show live video instead.
@@ -280,7 +416,7 @@ function step() {
         if (sb.buffered.length) sb.remove(sb.buffered.start(0), Math.max(0.1, video.currentTime - 5));
       } catch {}
     } else {
-      console.warn('[vd] appendBuffer', e);
+      dbg('delay', 'appendBuffer failed', e);
     }
   }
 }
@@ -300,6 +436,7 @@ function maintain() {
   // readyState below HAVE_CURRENT_DATA and the picture never comes back.
   if (D.live && lead > 2.5 && !D.pending.length && !D.sb.updating && now() - D.lastSeek > 400) {
     D.lastSeek = now();
+    dbg('delay', 'seek to live edge: lead was', lead.toFixed(2) + 's');
     video.currentTime = Math.max(start + 0.05, end - TARGET_LEAD);
   }
   // Scrubbed back and left there: don't let the buffer run away.
@@ -317,6 +454,7 @@ function show(id) {
 }
 
 function setSig(text, cls) {
+  dbg('viewer', 'status:', text);
   const el = $('#sigState');
   el.textContent = text;
   el.className = 'pill' + (cls ? ' ' + cls : '');
@@ -324,6 +462,7 @@ function setSig(text, cls) {
 
 function setDelay(sec, persist = true) {
   sec = clamp(Math.round(sec) || 0, 0, 600);
+  if (D.delayMs !== sec * 1000) dbg('delay', 'set to', sec + 's');
   D.delayMs = sec * 1000;
   $('#delay').value = clamp(sec, 0, 180);
   $('#delayNum').value = sec;
@@ -405,6 +544,8 @@ async function pollStats() {
 function newViewerPC(remoteId) {
   if (V.pc) { try { V.pc.close(); } catch {} }
   const pc = V.pc = new RTCPeerConnection(iceConfig());
+  dbg('viewer', 'new RTCPeerConnection, peer =', remoteId || '(manual)');
+  logPC(pc, 'viewer');
   V.peer = remoteId; V.pendingCands = [];
   pc.addEventListener('icecandidate', e => {
     if (e.candidate && V.sig && remoteId) V.sig.send('CANDIDATE', remoteId, e.candidate.toJSON());
@@ -423,10 +564,12 @@ async function handleOffer(m) {
   setSig('phone found \u2014 negotiating\u2026');
   const early = V.pendingCands;          // candidates that beat the offer here
   const pc = newViewerPC(m.src);
+  logSdp('viewer <- remote', m.payload.sdp);
   await pc.setRemoteDescription(m.payload.sdp);
   // Answer immediately and trickle candidates as separate messages. A
   // fully-gathered SDP is both slow and a large single broker message.
   await pc.setLocalDescription(await pc.createAnswer());
+  logSdp('viewer -> local', pc.localDescription);
   if (V.sig) V.sig.send('ANSWER', m.src, { sdp: sdpJson(pc.localDescription) });
   for (const c of early) { try { await pc.addIceCandidate(c); } catch {} }
 }
@@ -515,7 +658,10 @@ async function keepAwake() {
   try { C.wake = await navigator.wakeLock.request('screen'); } catch {}
 }
 
-function setCamState(t, cls) { const el = $('#camState'); el.textContent = t; el.className = 'pill' + (cls ? ' ' + cls : ''); }
+function setCamState(t, cls) {
+  dbg('camera', 'status:', t);
+  const el = $('#camState'); el.textContent = t; el.className = 'pill' + (cls ? ' ' + cls : '');
+}
 
 function applyBitrate() {
   if (!C.pc) return;
@@ -532,6 +678,8 @@ function applyBitrate() {
 function newCameraPC(dst) {
   if (C.pc) { try { C.pc.close(); } catch {} }
   const pc = C.pc = new RTCPeerConnection(iceConfig());
+  dbg('camera', 'new RTCPeerConnection, dst =', dst || '(manual)');
+  logPC(pc, 'camera');
   C.pendingCands = [];
   for (const t of C.stream.getTracks()) pc.addTrack(t, C.stream);
   pc.addEventListener('icecandidate', e => {
@@ -554,6 +702,7 @@ async function negotiate() {
   // host + srflx + relay candidates for four TURN URLs in a single broker
   // message, which is slow and large enough to get the socket closed.
   await pc.setLocalDescription(await pc.createOffer());
+  logSdp('camera -> local', pc.localDescription);
   C.sig.send('OFFER', dst, { sdp: sdpJson(pc.localDescription) });
   setCamState('offer sent\u2026');
 }
@@ -563,6 +712,7 @@ async function onCamMsg(ev) {
   if (m.type === 'ANSWER') {
     if (!C.pc) return;
     try {
+      logSdp('camera <- remote', m.payload.sdp);
       await C.pc.setRemoteDescription(m.payload.sdp);
       setCamState('answered \u2014 connecting\u2026');
       for (const c of C.pendingCands) { try { await C.pc.addIceCandidate(c); } catch {} }
@@ -633,6 +783,9 @@ async function startCamera(room) {
     toast('Camera unavailable: ' + e.name + (location.protocol === 'https:' ? '' : ' — needs HTTPS'));
     return;
   }
+  const vt = C.stream.getVideoTracks()[0];
+  dbg('camera', 'got media:', vt ? JSON.stringify(vt.getSettings()) : 'no video track',
+    'audio=' + C.stream.getAudioTracks().length);
   $('#pv').srcObject = C.stream;
   $('#camJoin').hidden = true;
   $('#camLive').hidden = false;
@@ -661,6 +814,30 @@ function stopCamera() {
 /* ============================== WIRING ============================== */
 
 function wire() {
+  /* --- debug log --- */
+  dbgPre = $('#dbgPre');
+  const logText = () => logHeader() + '\n' + LOG.join('\n');
+  $('#dbgCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText(logText()); toast('Log copied (' + LOG.length + ' lines)'); }
+    catch { toast('Copy blocked — use Download, or select the text'); }
+  };
+  $('#dbgSave').onclick = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([logText()], { type: 'text/plain' }));
+    a.download = 'video-delay-log.txt';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  };
+  $('#dbgClear').onclick = () => { LOG.length = 0; dbgPre.textContent = ''; dbg('log cleared'); };
+  const showLog = () => { $('#dbg').open = true; $('#dbg').scrollIntoView({ behavior: 'smooth', block: 'center' }); };
+  $('#btnLog').onclick = showLog;
+  $('#camLog').onclick = showLog;
+
+  addEventListener('error', e => dbg('!! window error:', e.message, (e.filename || '').split('/').pop() + ':' + e.lineno));
+  addEventListener('unhandledrejection', e => dbg('!! unhandled rejection:', fmtArg(e.reason)));
+  dbg('boot', navigator.userAgent);
+  dbg('boot', 'secure=' + window.isSecureContext, 'broker=' + SIGNAL_URL, 'MSImpl=' + (MSImpl ? MSImpl.name : 'none'));
+
   /* --- home --- */
   $('#goViewer').onclick = () => { location.hash = '#v'; startViewer(); };
   $('#goCamera').onclick = () => { show('camera'); $('#codeIn').focus(); };
