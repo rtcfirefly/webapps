@@ -144,12 +144,12 @@ const DEFAULT_ICE = {
   iceServers: [
     { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
     { urls: 'stun:stun.cloudflare.com:3478' },
-    // Public TURN. Only needed when the two devices cannot reach each other
-    // directly (phone on mobile data, or a NAT that blocks hairpinning).
-    { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turns:openrelay.metered.ca:443?transport=tcp'],
-      username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: ['turn:staticauth.openrelay.metered.ca:80', 'turn:staticauth.openrelay.metered.ca:443'],
-      username: 'openrelayproject', credential: 'openrelayproject' },
+    // No TURN by default. The openrelay.metered.ca servers that used to be here
+    // no longer resolve at all (every URL returned ICE error 701, "host lookup
+    // received error", 2026-08-22) -- they only added ~50 failed lookups and a
+    // gathering delay. There is no free TURN worth trusting; if you need a relay
+    // because the two devices cannot see each other directly, put your own
+    // credentials in Advanced -> ICE servers.
   ],
   iceCandidatePoolSize: 2,
 };
@@ -158,6 +158,28 @@ function iceConfig() {
   const raw = (store.get('ice', '') || '').trim();
   if (raw) { try { return JSON.parse(raw); } catch { toast('ICE JSON is invalid — using defaults'); } }
   return DEFAULT_ICE;
+}
+
+/* Chrome offers VP8, VP9, AV1 and four H.264 profiles, each with its own
+ * rtpmap/fmtp/rtcp-fb lines -- that codec list is most of a ~6 KB SDP. The
+ * public broker cleanly closes the socket on an offer that size (observed: a
+ * 6414 B send followed 200 ms later by close code 1000), and it is far too big
+ * for a scannable QR. Pinning negotiation to VP8 + rtx cuts the SDP to roughly a
+ * quarter. VP8 is also what the delay buffer re-encodes to, so this keeps one
+ * codec end to end. */
+function slimCodecs(pc) {
+  try {
+    const caps = { video: RTCRtpReceiver.getCapabilities('video'), audio: RTCRtpReceiver.getCapabilities('audio') };
+    const want = { video: /\/(VP8|rtx)$/i, audio: /\/opus$/i };
+    for (const t of pc.getTransceivers()) {
+      const kind = (t.receiver && t.receiver.track && t.receiver.track.kind) ||
+                   (t.sender && t.sender.track && t.sender.track.kind);
+      const cap = caps[kind];
+      if (!cap || !t.setCodecPreferences) continue;
+      const keep = cap.codecs.filter(c => want[kind].test(c.mimeType));
+      if (keep.length) t.setCodecPreferences(keep);
+    }
+  } catch (e) { dbg('codec', 'setCodecPreferences failed', e); }
 }
 
 /* --------------------------------------------------------- signalling  */
@@ -566,6 +588,7 @@ async function handleOffer(m) {
   const pc = newViewerPC(m.src);
   logSdp('viewer <- remote', m.payload.sdp);
   await pc.setRemoteDescription(m.payload.sdp);
+  slimCodecs(pc);   // transceivers only exist once the offer is applied
   // Answer immediately and trickle candidates as separate messages. A
   // fully-gathered SDP is both slow and a large single broker message.
   await pc.setLocalDescription(await pc.createAnswer());
@@ -701,6 +724,7 @@ async function negotiate() {
   // Trickle. The previous version waited for full ICE gathering and shipped
   // host + srflx + relay candidates for four TURN URLs in a single broker
   // message, which is slow and large enough to get the socket closed.
+  slimCodecs(pc);
   await pc.setLocalDescription(await pc.createOffer());
   logSdp('camera -> local', pc.localDescription);
   C.sig.send('OFFER', dst, { sdp: sdpJson(pc.localDescription) });
