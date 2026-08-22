@@ -31,23 +31,23 @@
     <div class="pane" id="paneLive">
       <video id="pip" playsinline muted></video>
       <div class="tag">live</div>
+      <div class="pip" id="pipLive" hidden>
+        <video id="selfLive" playsinline muted></video>
+        <div class="tag">you &middot; live</div>
+        <div class="grip" title="Drag to resize"></div>
+      </div>
     </div>
     <div class="pane" id="paneDelay">
       <video id="v" playsinline muted></video>
       <div class="tag" id="delayTag">30s delay</div>
+      <div class="pip" id="pipDelay" hidden>
+        <video id="selfDelay" playsinline muted></video>
+        <div class="tag" id="selfTag">you &middot; 30s</div>
+        <div class="grip" title="Drag to resize"></div>
+      </div>
       <div class="overlay" id="overlay">
         <div class="ovnum" id="ovNum">··</div>
         <div class="ovmsg" id="ovMsg">waiting for phone…</div>
-      </div>
-    </div>
-    <div class="selfview" id="selfview" hidden>
-      <div class="tile">
-        <video id="selfLive" playsinline muted></video>
-        <div class="tag">you &middot; live</div>
-      </div>
-      <div class="tile">
-        <video id="selfDelay" playsinline muted></video>
-        <div class="tag" id="selfTag">you &middot; 30s</div>
       </div>
     </div>
     <div class="hud" id="hud"></div>

@@ -552,6 +552,68 @@ function maintain(d) {
 
 const CAM = { stream: null, on: false };
 
+/* One geometry shared by both tiles, as percentages of their pane, so they stay
+ * symmetric and survive a resize of the window or a change of layout. */
+const PIP = Object.assign({ x: 62, y: 66, w: 34 }, store.get('pip', {}));
+
+function applyPip() {
+  for (const el of [$('#pipLive'), $('#pipDelay')]) {
+    el.style.width = PIP.w + '%';
+    el.style.left = PIP.x + '%';
+    el.style.top = PIP.y + '%';
+  }
+}
+
+function pipDrag(el) {
+  let mode = null, grabX = 0, grabY = 0, pane = null;
+
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    mode = e.target.classList.contains('grip') ? 'size' : 'move';
+    pane = el.parentElement.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    grabX = e.clientX - r.left;
+    grabY = e.clientY - r.top;
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('dragging');
+    e.preventDefault();
+  });
+
+  el.addEventListener('pointermove', (e) => {
+    if (!mode) return;
+    if (mode === 'move') {
+      // Clamp against the tile's own measured size so it cannot be dragged
+      // off its pane, whatever the pane's aspect ratio happens to be.
+      const wPct = el.offsetWidth / pane.width * 100;
+      const hPct = el.offsetHeight / pane.height * 100;
+      PIP.x = clamp((e.clientX - grabX - pane.left) / pane.width * 100, 0, Math.max(0, 100 - wPct));
+      PIP.y = clamp((e.clientY - grabY - pane.top) / pane.height * 100, 0, Math.max(0, 100 - hPct));
+    } else {
+      const left = pane.left + PIP.x / 100 * pane.width;
+      PIP.w = clamp((e.clientX - left) / pane.width * 100, 10, 70);
+    }
+    applyPip();
+  });
+
+  const end = (e) => {
+    if (!mode) return;
+    mode = null;
+    el.classList.remove('dragging');
+    try { el.releasePointerCapture(e.pointerId); } catch {}
+    store.set('pip', { x: PIP.x, y: PIP.y, w: PIP.w });
+    dbg('pip', 'x=' + PIP.x.toFixed(0) + '% y=' + PIP.y.toFixed(0) + '% w=' + PIP.w.toFixed(0) + '%');
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+
+  el.addEventListener('dblclick', () => {
+    Object.assign(PIP, { x: 62, y: 66, w: 34 });
+    applyPip();
+    store.set('pip', { x: PIP.x, y: PIP.y, w: PIP.w });
+    toast('Self-view reset');
+  });
+}
+
 async function toggleWebcam(want) {
   const on = want === undefined ? !CAM.on : want;
   if (!on) {
@@ -559,7 +621,7 @@ async function toggleWebcam(want) {
     if (CAM.stream) CAM.stream.getTracks().forEach(t => t.stop());
     CAM.stream = null; CAM.on = false;
     $('#selfLive').srcObject = null;
-    $('#selfview').hidden = true;
+    $('#pipLive').hidden = true; $('#pipDelay').hidden = true;
     $('#btnSelf').classList.remove('on');
     store.set('webcam', false);
     dbg('webcam', 'off');
@@ -578,7 +640,7 @@ async function toggleWebcam(want) {
     return;
   }
   CAM.on = true;
-  $('#selfview').hidden = false;
+  $('#pipLive').hidden = false; $('#pipDelay').hidden = false;
   $('#btnSelf').classList.add('on');
   $('#selfLive').srcObject = CAM.stream;
   $('#selfLive').play().catch(() => {});
@@ -1393,6 +1455,9 @@ function wire() {
   };
 
   $('#btnSelf').onclick = () => toggleWebcam();
+  applyPip();
+  pipDrag($('#pipLive'));
+  pipDrag($('#pipDelay'));
   if (store.get('mirror', false)) $('#btnMirror').click();
 
   /* --- pairing --- */

@@ -28,7 +28,7 @@ watch yourself half a minute ago.
 | **Freeze** | freeze frame; unfreezing leaves you in replay |
 | **Mirror** | flip horizontally — for practising in front of it |
 | **Layout** | **split** (live left, delayed right), **delayed only**, or a corner live thumbnail |
-| **Self** | this computer's webcam as two corner tiles, live above delayed, on the same delay |
+| **Self** | this computer's webcam inset into each pane — live inside live, delayed inside delayed |
 | **⛶** | fullscreen |
 
 In **fullscreen** the toolbar is gone, so a control bar inside the video
@@ -40,6 +40,11 @@ Keys: `space` freeze · `f` fullscreen · `m` mirror · `p` layout · `c` self-v
 
 Freeze, Live and the jump keys act on **both** feeds at once, so the phone and
 the self-view stay aligned.
+
+**Drag the self-view** to move it, drag its bottom-right grip to resize, and
+double-click to reset. Both tiles share one position and size — expressed as a
+percentage of their pane, so they stay symmetric and survive a window resize or
+a change of layout — and it is remembered across sessions.
 Delay: `-`/`=` ±1 s · `_`/`+` ±5 s · `alt` with any of them ±10 s (`↑`/`↓` also
 work, with `shift` for 5 s). `+` is already Shift+`=` on most layouts, so the
 shifted glyph picks the bigger step rather than a Shift modifier.

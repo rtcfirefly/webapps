@@ -147,16 +147,23 @@ details.sub[open] summary { margin-bottom: 8px; }
 .fsval { min-width: 92px; text-align: center; font: 700 26px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   font-variant-numeric: tabular-nums; color: var(--accent2); }
 
-/* Self-view: this computer's webcam, live above delayed. Bottom-right, clear
-   of the HUD (bottom-left) and the fullscreen delay bar (bottom-centre). */
-.selfview { position: absolute; right: 10px; bottom: 10px; z-index: 3;
-  display: flex; flex-direction: column; gap: 6px;
-  width: 18%; min-width: 116px; max-width: 230px; }
-.selfview .tile { position: relative; aspect-ratio: 16 / 9; background: #000;
-  border: 1px solid var(--line); border-radius: 8px; overflow: hidden; box-shadow: 0 6px 20px #0009; }
-.selfview video { width: 100%; height: 100%; object-fit: cover; display: block;
-  transform: scaleX(-1); }                       /* a self-view should read as a mirror */
-.stage.mirror .selfview video { transform: none; }
-.selfview .tag { top: 4px; left: 4px; padding: 3px 6px; font-size: 9px; }
-.selfview .tile:last-child .tag { color: var(--accent2); }
-.stage:fullscreen.idle .selfview { opacity: .55; transition: opacity .25s ease; }
+
+/* Self-view: the computer's webcam, one tile inside each pane -- live in the
+   live pane, delayed in the delayed pane. Draggable, and resizable by the
+   corner grip; position and size are shared by both so they stay symmetric. */
+.pip { position: absolute; z-index: 3; aspect-ratio: 16 / 9; background: #000;
+  border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+  box-shadow: 0 6px 20px #000a; cursor: grab; touch-action: none; }
+.pip.dragging { cursor: grabbing; border-color: var(--accent); }
+.pip video { width: 100%; height: 100%; object-fit: cover; display: block;
+  transform: scaleX(-1);                       /* a self-view should read as a mirror */
+  pointer-events: none; }
+.stage.mirror .pip video { transform: none; }
+.pip .tag { top: 4px; left: 4px; padding: 3px 6px; font-size: 9px; }
+#pipDelay .tag { color: var(--accent2); }
+.pip .grip { position: absolute; right: 0; bottom: 0; width: 22px; height: 22px;
+  cursor: nwse-resize; touch-action: none;
+  background: linear-gradient(135deg, transparent 50%, #ffffff55 50%, #ffffff55 100%); }
+.pip .grip:hover { background: linear-gradient(135deg, transparent 50%, var(--accent) 50%, var(--accent) 100%); }
+/* In pip layout the live pane is already a thumbnail; no tile inside a tile. */
+.stage[data-layout="pip"] #pipLive { display: none; }
