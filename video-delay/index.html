@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="description" content="Phone camera on your PC screen, on a delay. WebRTC, no dependencies.">
+<title>Video Delay</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%8F%B1%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============================ home ============================ -->
+<section id="home" class="view">
+  <div class="card">
+    <h1>Video Delay</h1>
+    <p class="sub">Your phone's camera on your PC screen, <b>N seconds late</b>.</p>
+    <div class="pick">
+      <button id="goViewer" class="big"><span class="emo">🖥️</span><span class="lbl">Viewer</span><small>this device shows the delayed video</small></button>
+      <button id="goCamera" class="big"><span class="emo">📱</span><span class="lbl">Camera</span><small>this device sends its camera</small></button>
+    </div>
+    <p class="hint">Open <b>Viewer</b> on the PC first — it shows a 6-character code. Then open this page on the phone, tap <b>Camera</b> and type the code.</p>
+  </div>
+</section>
+
+<!-- ============================ viewer ============================ -->
+<section id="viewer" class="view" hidden>
+  <div class="stage" id="stage">
+    <video id="v" playsinline muted></video>
+    <video id="pip" playsinline muted hidden></video>
+    <div class="overlay" id="overlay">
+      <div class="ovnum" id="ovNum">··</div>
+      <div class="ovmsg" id="ovMsg">waiting for phone…</div>
+    </div>
+    <div class="hud" id="hud"></div>
+  </div>
+
+  <div class="toolbar">
+    <div class="grp delaygrp">
+      <label for="delay">Delay</label>
+      <input type="range" id="delay" min="0" max="180" step="1" value="30">
+      <input type="number" id="delayNum" min="0" max="600" step="1" value="30"><span class="unit">s</span>
+      <div class="presets" id="presets"></div>
+    </div>
+    <div class="grp">
+      <button id="btnLive" title="Jump to the delayed live edge (L)">Live</button>
+      <button id="btnBack" title="Replay 10 s (←)">⏪&nbsp;10s</button>
+      <button id="btnFreeze" title="Freeze frame (Space)">Freeze</button>
+      <button id="btnMirror" title="Mirror image (M)">Mirror</button>
+      <button id="btnPip" title="Live (undelayed) thumbnail (P)">Live&nbsp;PiP</button>
+      <button id="btnMute" title="Audio on/off (U)">🔇</button>
+      <button id="btnFs" title="Fullscreen (F)">⛶</button>
+    </div>
+  </div>
+
+  <div class="pairing" id="pairing">
+    <div class="code" id="roomCode">······</div>
+    <div class="pairtxt">on the phone open <code id="joinUrl">…</code></div>
+    <div class="grp">
+      <button id="copyLink" class="sm">Copy link</button>
+      <button id="newRoom" class="sm">New code</button>
+      <span id="sigState" class="pill">connecting…</span>
+    </div>
+  </div>
+
+  <details class="adv" id="vManual">
+    <summary>Pair manually (no signalling server)</summary>
+    <div class="row">
+      <label>1 — paste the <b>offer code</b> the phone produced</label>
+      <textarea id="mvIn" spellcheck="false" placeholder="paste here"></textarea>
+      <div class="grp"><button id="mvGo">Make answer</button></div>
+    </div>
+    <div class="row">
+      <label>2 — send this <b>answer code</b> back to the phone</label>
+      <textarea id="mvOut" spellcheck="false" readonly></textarea>
+      <div class="grp"><button id="mvCopy" class="sm">Copy</button></div>
+    </div>
+  </details>
+
+  <details class="adv">
+    <summary>Advanced</summary>
+    <div class="row">
+      <label>ICE servers (JSON <code>RTCConfiguration</code>) — blank for defaults</label>
+      <textarea id="iceCfg" spellcheck="false" placeholder="default: Google STUN + OpenRelay TURN"></textarea>
+    </div>
+    <div class="row">
+      <label>Signalling WebSocket URL</label>
+      <input type="text" id="sigUrl" spellcheck="false">
+    </div>
+    <div class="grp"><button id="advSave" class="sm">Save &amp; reload</button><button id="advReset" class="sm">Reset</button></div>
+  </details>
+
+  <button class="link back" data-back>← back</button>
+</section>
+
+<!-- ============================ camera ============================ -->
+<section id="camera" class="view" hidden>
+  <div class="card">
+    <h2>📱 Camera</h2>
+
+    <div id="camJoin">
+      <label for="codeIn" class="pairtxt">Code shown on the PC</label>
+      <input id="codeIn" inputmode="text" autocapitalize="characters" autocorrect="off" autocomplete="off" spellcheck="false" placeholder="ABC123" maxlength="8">
+      <label class="chk" style="margin-bottom:14px"><input type="checkbox" id="mic"> send microphone audio too</label>
+      <button id="camConnect" class="big2">Connect</button>
+    </div>
+
+    <div id="camLive" hidden>
+      <video id="pv" playsinline muted autoplay></video>
+      <div class="grp" style="margin-bottom:12px">
+        <button id="flip">🔄 Flip</button>
+        <select id="res" title="capture resolution">
+          <option value="480">480p</option>
+          <option value="720" selected>720p</option>
+          <option value="1080">1080p</option>
+        </select>
+        <select id="rate" title="max send bitrate">
+          <option value="1000000">1 Mbps</option>
+          <option value="2500000" selected>2.5 Mbps</option>
+          <option value="5000000">5 Mbps</option>
+          <option value="8000000">8 Mbps</option>
+        </select>
+        <span id="camState" class="pill">…</span>
+      </div>
+      <button id="camStop" class="link">disconnect</button>
+    </div>
+
+    <details class="adv" id="cManual" style="margin-top:14px">
+      <summary>Pair manually (no signalling server)</summary>
+      <div class="row">
+        <label>1 — make an <b>offer code</b> and get it to the PC</label>
+        <textarea id="mcOut" spellcheck="false" readonly></textarea>
+        <div class="grp"><button id="mcMake">Make offer</button><button id="mcCopy" class="sm">Copy</button></div>
+      </div>
+      <div class="row">
+        <label>2 — paste the <b>answer code</b> from the PC</label>
+        <textarea id="mcIn" spellcheck="false" placeholder="paste here"></textarea>
+        <div class="grp"><button id="mcGo">Finish</button></div>
+      </div>
+    </details>
+
+    <button class="link back" data-back>← back</button>
+  </div>
+</section>
+
+<div id="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
