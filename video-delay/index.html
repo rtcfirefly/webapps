@@ -94,13 +94,13 @@
     <summary>Advanced</summary>
     <div class="row">
       <label>ICE servers (JSON <code>RTCConfiguration</code>) — blank for defaults</label>
-      <textarea id="iceCfg" spellcheck="false" placeholder="default: Google STUN + OpenRelay TURN"></textarea>
+      <textarea id="iceCfg" spellcheck="false" placeholder="default: Google + Cloudflare STUN, no TURN"></textarea>
     </div>
     <div class="row">
       <label>Signalling WebSocket URL</label>
       <input type="text" id="sigUrl" spellcheck="false">
     </div>
-    <div class="grp"><button id="advSave" class="sm">Save &amp; reload</button><button id="advReset" class="sm">Reset</button></div>
+    <div class="grp"><button id="advSave" class="sm">Save &amp; reload</button><button id="advReset" class="sm">Reset</button><button id="advTest" class="sm">Test the broker</button></div>
   </details>
 
   <button class="link back" data-back>← back</button>

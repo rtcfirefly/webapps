@@ -129,7 +129,7 @@ function logHeader() {
     'ua        : ' + navigator.userAgent,
     'secure    : ' + window.isSecureContext + '   screen: ' + screen.width + 'x' + screen.height + '@' + devicePixelRatio,
     'broker    : ' + SIGNAL_URL,
-    'ice       : ' + (store.get('ice', '') ? 'custom' : 'default (google stun + openrelay turn)'),
+    'ice       : ' + (store.get('ice', '') ? 'custom' : 'default (google + cloudflare STUN, no TURN)'),
     'MSImpl    : ' + (MSImpl ? MSImpl.name : 'none') + '   MediaRecorder: ' + (window.MediaRecorder ? 'yes' : 'no'),
     'codecs    : ' + cap.join('  ') + '   (R=MediaRecorder M=MediaSource)',
     'room      : ' + (V.room || C.room || '-'),
@@ -590,7 +590,7 @@ function newViewerPC(remoteId, cfg) {
   logPC(pc, 'viewer');
   V.peer = remoteId; V.pendingCands = [];
   pc.addEventListener('icecandidate', e => {
-    if (e.candidate && V.sig && remoteId) V.sig.send('CANDIDATE', remoteId, e.candidate.toJSON());
+    if (e.candidate && V.sig && remoteId && !pc.__gathered) V.sig.send('CANDIDATE', remoteId, e.candidate.toJSON());
   });
   pc.addEventListener('track', e => { if (e.streams[0]) attachRemote(e.streams[0]); });
   pc.addEventListener('connectionstatechange', () => {
@@ -612,6 +612,8 @@ async function handleOffer(m) {
   // Answer immediately and trickle candidates as separate messages. A
   // fully-gathered SDP is both slow and a large single broker message.
   await pc.setLocalDescription(await pc.createAnswer());
+  await waitIce(pc, 2500);
+  pc.__gathered = true;
   logSdp('viewer -> local', pc.localDescription);
   if (V.sig) V.sig.send('ANSWER', m.src, { sdp: sdpJson(pc.localDescription) });
   for (const c of early) { try { await pc.addIceCandidate(c); } catch {} }
@@ -683,7 +685,7 @@ async function connectViewerSignal() {
 
 /* ============================== CAMERA UI ============================== */
 
-const C = { sig: null, pc: null, stream: null, room: '', wake: null, retry: 0, pendingCands: [], backoff: 1000 };
+const C = { sig: null, pc: null, stream: null, room: '', wake: null, retry: 0, answerTimer: 0, pendingCands: [], backoff: 1000 };
 
 async function getCam(facing, height) {
   return navigator.mediaDevices.getUserMedia({
@@ -726,7 +728,7 @@ function newCameraPC(dst, cfg) {
   C.pendingCands = [];
   for (const t of C.stream.getTracks()) pc.addTrack(t, C.stream);
   pc.addEventListener('icecandidate', e => {
-    if (e.candidate && C.sig && dst) C.sig.send('CANDIDATE', dst, e.candidate.toJSON());
+    if (e.candidate && C.sig && dst && !pc.__gathered) C.sig.send('CANDIDATE', dst, e.candidate.toJSON());
   });
   pc.addEventListener('connectionstatechange', () => {
     const s = pc.connectionState;
@@ -741,14 +743,24 @@ async function negotiate() {
   if (!C.sig || !C.stream) return;
   const dst = viewerId(C.room);
   const pc = newCameraPC(dst);
-  // Trickle. The previous version waited for full ICE gathering and shipped
-  // host + srflx + relay candidates for four TURN URLs in a single broker
-  // message, which is slow and large enough to get the socket closed.
   slimCodecs(pc);
   await pc.setLocalDescription(await pc.createOffer());
+  // With no TURN in the list, gathering finishes in ~150 ms, so folding the
+  // candidates into the offer costs nothing and takes the broker traffic from
+  // eighteen messages to one. Trickle stays wired up for anything that arrives
+  // after the offer has gone.
+  await waitIce(pc, 2500);
+  pc.__gathered = true;
   logSdp('camera -> local', pc.localDescription);
   C.sig.send('OFFER', dst, { sdp: sdpJson(pc.localDescription) });
   setCamState('offer sent\u2026');
+
+  clearTimeout(C.answerTimer);
+  C.answerTimer = setTimeout(() => {
+    if (C.pc && C.pc.remoteDescription) return;
+    dbg('camera', 'no ANSWER within 6s of the offer');
+    setCamState('the PC never answered \u2014 is the Viewer open on code ' + C.room + '?', 'bad');
+  }, 6000);
 }
 
 async function onCamMsg(ev) {
@@ -756,6 +768,7 @@ async function onCamMsg(ev) {
   if (m.type === 'ANSWER') {
     if (!C.pc) return;
     try {
+      clearTimeout(C.answerTimer);
       logSdp('camera <- remote', m.payload.sdp);
       await C.pc.setRemoteDescription(m.payload.sdp);
       setCamState('answered \u2014 connecting\u2026');
@@ -853,6 +866,64 @@ function stopCamera() {
   $('#pv').srcObject = null;
   $('#camLive').hidden = true;
   $('#camJoin').hidden = false;
+}
+
+/* A self-contained probe of the broker, so its behaviour can be established
+ * independently of everything else in the app. It opens two sockets and asks
+ * three questions: does it relay at all, does messaging a peer that does not
+ * exist get the sender disconnected, and does a large message. Written because
+ * a size hypothesis looked convincing from the app's own logs and turned out to
+ * be wrong. */
+async function brokerSelfTest() {
+  const btn = $('#advTest');
+  btn.disabled = true; btn.textContent = 'testing…';
+  $('#dbg').open = true;
+  dbg('selftest', '===== broker self-test:', SIGNAL_URL, '=====');
+
+  const idA = 'vdtest-' + rand4() + '-a', idB = 'vdtest-' + rand4() + '-b';
+  const A = new Signal(idA), B = new Signal(idB);
+  const payload = n => ({ sdp: { type: 'offer', sdp: 'x'.repeat(n) } });
+  const waitMsg = (sig, ms) => new Promise(res => {
+    const h = ev => { sig.removeEventListener('msg', h); res(ev.detail); };
+    sig.addEventListener('msg', h);
+    setTimeout(() => { sig.removeEventListener('msg', h); res(null); }, ms);
+  });
+  const waitDown = (sig, ms) => new Promise(res => {
+    sig.addEventListener('down', () => res(true), { once: true });
+    setTimeout(() => res(false), ms);
+  });
+
+  try {
+    await A.open(); await B.open();
+    dbg('selftest', 'both sockets open:', idA, idB);
+
+    A.send('OFFER', idB, payload(200));
+    const relayed = await waitMsg(B, 4000);
+    dbg('selftest', '1. relay A->B (200B) :', relayed ? 'RECEIVED ' + relayed.type : 'NOT RECEIVED');
+
+    const ghost = 'vdtest-' + rand4() + '-ghost';
+    A.send('OFFER', ghost, payload(200));
+    const diedOnGhost = await waitDown(A, 4000);
+    dbg('selftest', '2. send to peer that does not exist :',
+      diedOnGhost ? 'SOCKET CLOSED  <-- explains the camera drop' : 'socket survived');
+
+    if (!diedOnGhost) {
+      A.send('OFFER', idB, payload(8000));
+      const big = await Promise.race([
+        waitMsg(B, 4000).then(m => m ? 'RECEIVED' : 'not received'),
+        waitDown(A, 4000).then(d => d ? 'SOCKET CLOSED' : null),
+      ]);
+      dbg('selftest', '3. 8KB message :', big || 'not received');
+    } else {
+      dbg('selftest', '3. 8KB message : skipped, socket already gone');
+    }
+  } catch (e) {
+    dbg('selftest', 'FAILED:', e.message, '- the broker is unreachable from here');
+  }
+  A.close(); B.close();
+  dbg('selftest', '===== done =====');
+  toast('Self-test finished — read the debug log');
+  btn.disabled = false; btn.textContent = 'Test the broker';
 }
 
 /* ========================= MANUAL PAIRING (2 step) =========================
@@ -1099,6 +1170,7 @@ function wire() {
     location.reload();
   };
   $('#advReset').onclick = () => { store.set('ice', ''); store.set('signal', ''); location.reload(); };
+  $('#advTest').onclick = () => brokerSelfTest();
 
   /* --- manual pairing, viewer side --- */
   $('#mvStart').onclick = manualOffer;
