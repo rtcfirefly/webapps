@@ -173,3 +173,23 @@ details.sub[open] summary { margin-bottom: 8px; }
   letter-spacing: .12em; text-align: center; color: var(--accent2); margin: 10px 0; }
 #vfyCam { width: 100%; max-width: 420px; border-radius: 8px; border: 1px solid var(--line);
   background: #000; margin: 8px 0; }
+
+/* ---- hero-first pairing: the QR is the page until a phone connects ---- */
+.hero { max-width: 560px; width: 100%; margin: auto; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.hero h2 { margin: 0 0 2px; font-size: clamp(18px, 4vw, 26px); }
+.hero .qrbox { margin: 2px 0; }
+.hero details { width: 100%; text-align: left; }
+.herobar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center; }
+
+#viewer:not(.connected) #stage,
+#viewer:not(.connected) #toolbar,
+#viewer:not(.connected) #verify { display: none; }
+#viewer.connected #pairHero { display: none; }
+
+/* ---- phone: the scanner is the landing page ---- */
+.scanwrap { position: relative; width: 100%; max-width: 420px; aspect-ratio: 3 / 4;
+  border-radius: 14px; overflow: hidden; background: #000; border: 1px solid var(--line); }
+.scanwrap video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.reticle { position: absolute; inset: 14%; border: 3px solid var(--accent); border-radius: 12px;
+  box-shadow: 0 0 0 100vmax #0007; pointer-events: none; }

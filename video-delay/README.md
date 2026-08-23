@@ -9,11 +9,15 @@ No dependencies, no build step, no bundler — three static files.
 
 ## Use it
 
-1. On the **PC**, open the page and pick **Viewer**. It shows a 6-character code.
-2. On the **phone**, open the same page, tap **Camera**, type the code
-   (or just open the `#c=CODE` link the viewer prints).
-3. Video appears on the PC 30 seconds later. Drag the slider to change that,
-   0–600 s, live.
+Open the same URL on both devices. There is nothing to choose:
+
+1. The **desktop** lands on a full-page **QR code** and waits.
+2. The **phone** lands on a **QR scanner**. Point it at the screen.
+3. Connected. The PC replaces the QR with the video; the delay controls appear
+   with it. Drag the slider for 0–600 s, live.
+
+Roles are guessed from the device, and the guess is one tap to undo — each page
+has a *this is my camera / this is my screen* link. `#v` and `#cam` force a role.
 
 The delay is real: you can leave the phone propped up, walk into frame, and
 watch yourself half a minute ago.
@@ -197,6 +201,23 @@ just your network. Full SDP is *off* by default for the same reason; the
 checkbox in the panel turns it on if it's genuinely needed.
 
 ## Pairing security (optional)
+
+### The QR is the authentication channel
+
+The pairing QR carries the viewer's offer, and that offer carries the viewer's
+**DTLS certificate fingerprint** — delivered to the phone over a camera rather
+than over the broker. The viewer generates **one certificate per session** and
+reuses it for every connection it makes, so that fingerprint stays valid however
+the connection is finally established.
+
+So the phone pins it. When the answer comes back, if its fingerprint is not the
+one that was scanned, **the phone refuses before `setRemoteDescription` and
+sends nothing**. A broker that substituted a peer, or someone who guessed the
+room code and answered first, is rejected automatically — no comparing, no user
+decision.
+
+This needs `RTCPeerConnection.generateCertificate`. Where that is unavailable
+the app still works and falls back to the manual check below.
 
 Once connected, **Pairing security** on both pages shows a safety code — three
 groups of four letters for reading, plus a QR carrying the **entire SHA-256**.

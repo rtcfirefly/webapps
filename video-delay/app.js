@@ -582,6 +582,7 @@ function maintain(d) {
 /* ------------------------------------------------- the PC's own webcam  */
 
 const CAM = { stream: null, on: false };
+const JOIN = { fp: null };      // viewer fingerprint pinned by the scanned QR
 
 /* One geometry shared by both tiles, as percentages of their pane, so they stay
  * symmetric and survive a resize of the window or a change of layout. */
@@ -686,6 +687,11 @@ const V = { sig: null, pc: null, room: '', peer: null, manual: false, reoffer: 0
 
 function show(id) {
   for (const s of document.querySelectorAll('.view')) s.hidden = (s.id !== id);
+}
+
+function setConnected(on) {
+  $('#viewer').classList.toggle('connected', !!on);
+  $('#heroTitle').textContent = on ? 'Connected' : 'Scan this with your phone';
 }
 
 function setSig(text, cls) {
@@ -865,9 +871,25 @@ async function pollStats() {
   });
 }
 
+/* Every connection this viewer makes reuses one certificate, so the DTLS
+ * fingerprint printed into the pairing QR is the same one the phone will see
+ * however the connection is finally made. That turns the QR into an
+ * out-of-band authentication channel: the phone got the fingerprint over a
+ * camera, not over the broker, so it can refuse anything else. */
+let VCERT = null;
+async function viewerCert() {
+  if (VCERT) return VCERT;
+  try {
+    VCERT = await RTCPeerConnection.generateCertificate({ name: 'ECDSA', namedCurve: 'P-256' });
+    dbg('viewer', 'session certificate generated');
+  } catch (e) { dbg('viewer', 'generateCertificate unsupported, QR auth disabled:', e.message); VCERT = null; }
+  return VCERT;
+}
+
 function newViewerPC(remoteId, cfg) {
   if (V.pc) { try { V.pc.close(); } catch {} }
-  const pc = V.pc = new RTCPeerConnection(cfg || iceConfig());
+  const base = cfg || iceConfig();
+  const pc = V.pc = new RTCPeerConnection(VCERT ? Object.assign({}, base, { certificates: [VCERT] }) : base);
   dbg('viewer', 'new RTCPeerConnection, peer =', remoteId || '(manual)');
   logPC(pc, 'viewer');
   V.peer = remoteId; V.pendingCands = [];
@@ -878,6 +900,7 @@ function newViewerPC(remoteId, cfg) {
   pc.addEventListener('connectionstatechange', () => {
     updateHud();
     if (pc.connectionState === 'connected') {
+      setConnected(true);
       setSig('phone connected', 'ok');
       setVfy('pending', 'Compare with the phone, or scan its code.');
       refreshSas(pc, $('#vfyCode'), $('#vfyQr'));
@@ -891,7 +914,10 @@ function newViewerPC(remoteId, cfg) {
       clearTimeout(V.reoffer);
       V.reoffer = setTimeout(() => manualOffer(), 1200);
     }
-    if (pc.connectionState === 'disconnected' || pc.connectionState === 'closed') setSig('phone disconnected', 'bad');
+    if (['disconnected', 'closed', 'failed'].includes(pc.connectionState)) {
+      setSig('phone disconnected', 'bad');
+      setConnected(false);
+    }
   });
   return pc;
 }
@@ -923,6 +949,8 @@ async function handleOffer(m) {
 
 async function startViewer() {
   show('viewer');
+  setConnected(false);
+  await viewerCert();          // before any connection, so every offer carries it
   setDelay(store.get('delay', 30), false);
   renderJoin(store.get('room', '') || newRoom(), 'startup');
   updateOverlay();
@@ -938,8 +966,15 @@ async function startViewer() {
   // standalone offer, so one scan works whether or not the broker is healthy.
   // Generated after the broker attempt so the room code baked into it is final
   // -- an ID-TAKEN retry can still change it up to that point.
-  $('#vManual').open = true;
   manualOffer();
+  // The fallback panel is noise until it is needed. If a phone has not
+  // connected after a while, it probably scanned and is now showing an answer.
+  clearTimeout(startViewer.hint);
+  startViewer.hint = setTimeout(() => {
+    if (V.pc && V.pc.connectionState === 'connected') return;
+    $('#vManual').open = true;
+    dbg('viewer', 'nothing connected after 20s - surfacing the answer-code panel');
+  }, 20000);
 }
 
 function renderJoin(room, why) {
@@ -1099,6 +1134,19 @@ async function onCamMsg(ev) {
   const m = ev.detail;
   if (m.type === 'ANSWER') {
     if (!C.pc) return;
+    // Checked before setRemoteDescription, so media never starts flowing to a
+    // machine other than the one whose QR was physically scanned.
+    if (JOIN.fp) {
+      const got = dtlsPrint(m.payload.sdp);
+      if (got && got !== JOIN.fp) {
+        dbg('camera', 'FINGERPRINT MISMATCH - scanned', JOIN.fp.slice(-17), 'but the answer carries', got.slice(-17));
+        setCamState('SECURITY: that is not the PC you scanned', 'bad');
+        toast('Refused — the answer came from a different machine than the QR. Nothing was sent.');
+        stopCamera();
+        return;
+      }
+      dbg('camera', 'answer matches the scanned fingerprint - verified by QR');
+    }
     try {
       clearTimeout(C.answerTimer);
       logSdp('camera <- remote', m.payload.sdp);
@@ -1179,6 +1227,7 @@ async function startCamera(room, opts = {}) {
   dbg('camera', 'got media:', vt ? JSON.stringify(vt.getSettings()) : 'no video track',
     'audio=' + C.stream.getAudioTracks().length);
   $('#pv').srcObject = C.stream;
+  camStage('card');
   $('#camJoin').hidden = true;
   $('#camLive').hidden = false;
   keepAwake();
@@ -1288,7 +1337,7 @@ function joinBase() {
 
 async function manualOffer() {
   const btn = $('#mvStart');
-  btn.disabled = true; btn.textContent = 'gathering…';
+  btn.disabled = true; btn.textContent = '…';
   try {
     V.manual = true;
     const pc = newViewerPC(null, MANUAL_ICE);
@@ -1315,11 +1364,11 @@ async function manualOffer() {
       ? 'Scan with your phone\u2019s camera. It connects over the broker if that works, and finishes from this code if it does not.'
       : 'Too long for a QR on this connection \u2014 copy the code across instead.';
     dbg('manual', 'QR', fitted ? 'rendered' : 'DID NOT FIT');
-    btn.textContent = 'Regenerate QR';
+    btn.textContent = 'Regenerate';
   } catch (e) {
     dbg('manual', 'offer failed', e);
     toast('Could not make an offer: ' + e.message);
-    btn.textContent = 'Show pairing QR';
+    btn.textContent = 'Regenerate';
   }
   btn.disabled = false;
 }
@@ -1357,13 +1406,19 @@ async function manualFinish(text) {
  * to the embedded offer only if that has not connected in time. */
 async function joinFromQr(code) {
   show('camera');
+  stopScan();
+  camStage('card');
   let o;
   try { o = await unpack(code); }
   catch (e) { dbg('join', 'unpack failed', e); toast('That pairing code is unreadable'); return; }
   if (!o || !(o.k === 'j' || o.k === 'o')) { toast('That does not look like a pairing code'); return; }
   if (!o.r) return manualAnswer(null, o.s);     // older QR: no room, manual only
 
-  dbg('join', 'scanned pairing QR: room', o.r, 'offer', (o.s || '').length + 'B - trying the broker first');
+  // The fingerprint arrived over a camera, not over the broker. Anything that
+  // later claims to be this viewer must present the same certificate.
+  JOIN.fp = dtlsPrint({ sdp: o.s || '' });
+  dbg('join', 'scanned pairing QR: room', o.r, 'offer', (o.s || '').length + 'B,',
+    JOIN.fp ? 'pinned fingerprint ' + JOIN.fp.slice(-17) : 'NO fingerprint in the offer');
   $('#codeIn').value = o.r;
   await startCamera(o.r, { fallbackOffer: o.s });
 }
@@ -1393,6 +1448,8 @@ function armBrokerFallback(ms) {
 
 async function manualAnswer(code, sdpDirect) {
   show('camera');
+  stopScan();
+  camStage('card');
   $('#cManual').open = true;
   $('#mcAnswerRow').hidden = true;          // re-pairing: clear the previous answer
   $('#mcOfferRow').hidden = false;
@@ -1460,22 +1517,25 @@ function stopScan() {
 
 /* One webcam scanner, two jobs: reading the phone's answer during manual
  * pairing, and reading its safety code afterwards. */
-async function startScan({ video, btn, onResult }) {
-  if (SCAN.on) { const same = SCAN.btn === btn; stopScan(); if (same) return; }
-  if (!await scannerAvailable()) { toast('No QR scanner in this browser — compare the codes by eye instead'); return; }
+async function startScan({ video, btn, onResult, facing = 'user', quiet = false }) {
+  if (SCAN.on) { const same = SCAN.btn === btn && SCAN.video === video; stopScan(); if (same) return; }
+  if (!await scannerAvailable()) {
+    if (!quiet) toast('No QR scanner in this browser — compare the codes by eye instead');
+    return false;
+  }
   let det;
   try { det = new BarcodeDetector({ formats: ['qr_code'] }); }
-  catch (e) { toast('Scanner unavailable: ' + e.name); return; }
+  catch (e) { if (!quiet) toast('Scanner unavailable: ' + e.name); return false; }
   try {
-    SCAN.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } });
-  } catch (e) { dbg('scan', 'getUserMedia failed', e); toast('No webcam available: ' + e.name); return; }
+    SCAN.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 } } });
+  } catch (e) { dbg('scan', 'getUserMedia failed', e); if (!quiet) toast('No camera available: ' + e.name); return false; }
 
-  SCAN.video = video; SCAN.btn = btn; SCAN.label = btn.innerHTML;
+  SCAN.video = video; SCAN.btn = btn || null; SCAN.label = btn ? btn.innerHTML : '';
   video.srcObject = SCAN.stream; video.hidden = false;
   await video.play().catch(() => {});
   SCAN.on = true;
-  btn.textContent = 'Stop scanning';
-  dbg('scan', 'started for', btn.id);
+  if (btn) btn.textContent = 'Stop scanning';
+  dbg('scan', 'started', facing, 'camera for', (btn && btn.id) || video.id);
 
   const tick = async () => {
     if (!SCAN.on) return;
@@ -1492,6 +1552,45 @@ async function startScan({ video, btn, onResult }) {
     SCAN.timer = setTimeout(tick, 150);   // a timer, not rAF: rAF stalls when the tab is not focused
   };
   tick();
+  return true;
+}
+
+/* ---------------------------------------------- the phone's landing page  */
+
+function camStage(mode) {           // 'scan' | 'card'
+  $('#scanHero').hidden = mode !== 'scan';
+  $('#camCard').hidden = mode === 'scan';
+}
+
+/* Anything a pairing QR might contain: the full link, a bare packed code, or a
+ * typed room code. */
+function onScanned(text) {
+  const s = (text || '').trim();
+  dbg('scan', 'got', s.length + ' chars');
+  const j = s.indexOf('#j=');
+  if (j >= 0) { location.hash = s.slice(j); joinFromQr(s.slice(j + 3)); return; }
+  const p = s.indexOf('#p=');
+  if (p >= 0) { manualAnswer(s.slice(p + 3)); return; }
+  if (/^[DZJ][A-Za-z0-9_-]{20,}$/.test(s)) { joinFromQr(s); return; }
+  if (/^[A-Za-z0-9]{4,8}$/.test(s)) { camStage('card'); startCamera(s.toUpperCase()); return; }
+  $('#scanNote').textContent = 'That code is not a pairing code — keep pointing at the PC.';
+}
+
+async function startPhoneScanner() {
+  show('camera');
+  camStage('scan');
+  const note = $('#scanNote');
+  note.textContent = 'starting the camera…';
+  const ok = await startScan({
+    video: $('#scanCam'), btn: null, facing: 'environment', quiet: true, onResult: onScanned,
+  });
+  if (ok) { note.textContent = 'looking for the code on your PC…'; return; }
+  // No BarcodeDetector, or no camera permission: the link still works if they
+  // open it with the phone's own camera app, and the code can be typed.
+  note.textContent = 'No scanner here. Open the PC\u2019s link with your camera app, or type the code below.';
+  camStage('card');
+  $('#camJoin').hidden = false;
+  $('#cManual').open = true;
 }
 
 /* ====================== PAIRING SECURITY (safety code) ======================
@@ -1587,8 +1686,7 @@ function wire() {
   };
   $('#dbgClear').onclick = () => { LOG.length = 0; dbgPre.textContent = ''; dbg('log cleared'); };
   const showLog = () => { $('#dbg').open = true; $('#dbg').scrollIntoView({ behavior: 'smooth', block: 'center' }); };
-  $('#btnLog').onclick = showLog;
-  $('#camLog').onclick = showLog;
+  for (const b of document.querySelectorAll('[data-log]')) b.onclick = showLog;
 
   addEventListener('error', e => dbg('!! window error:', e.message, (e.filename || '').split('/').pop() + ':' + e.lineno));
   addEventListener('unhandledrejection', e => dbg('!! unhandled rejection:', fmtArg(e.reason)));
@@ -1607,10 +1705,25 @@ function wire() {
 
   /* --- home --- */
   $('#goViewer').onclick = () => { location.hash = '#v'; startViewer(); };
-  $('#goCamera').onclick = () => { show('camera'); $('#codeIn').focus(); };
+  $('#goCamera').onclick = () => { location.hash = '#cam'; startPhoneScanner(); };
+  $('#scanRetry').onclick = () => { stopScan(); startPhoneScanner(); };
+  $('#scanManual').onclick = () => {
+    stopScan(); camStage('card');
+    $('#camJoin').hidden = false; $('#camLive').hidden = true;
+    $('#codeIn').focus();
+  };
   for (const b of document.querySelectorAll('[data-back]')) {
-    b.onclick = () => { for (const d of LINES) stopDelay(d); toggleWebcam(false); stopCamera(); stopScan(); if (V.sig) V.sig.close(); if (V.pc) try { V.pc.close(); } catch {}
-      V.pc = null; V.sig = null; clearInterval(V.statsTimer); location.hash = ''; show('home'); };
+    b.onclick = () => {
+      for (const d of LINES) stopDelay(d);
+      toggleWebcam(false); stopCamera(); stopScan();
+      if (V.sig) V.sig.close();
+      if (V.pc) { try { V.pc.close(); } catch {} }
+      V.pc = null; V.sig = null; clearInterval(V.statsTimer);
+      const role = b.dataset.role;
+      if (role === 'camera') { location.hash = '#cam'; startPhoneScanner(); }
+      else if (role === 'viewer') { location.hash = '#v'; startViewer(); }
+      else { location.hash = '#home'; show('home'); }
+    };
   }
 
   /* --- delay controls --- */
@@ -1807,6 +1920,15 @@ function jump(sec) {
   setLiveBtn();
 }
 
+/* The roles are not symmetric in practice: the big screen watches, the thing
+ * with a camera in your hand sends. Guessing right removes a choice nobody
+ * wants to make twice, and the picker is still one tap away when the guess is
+ * wrong. */
+const isHandheld = () =>
+  (navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean')
+    ? navigator.userAgentData.mobile
+    : /Android|iPhone|iPad|iPod|Mobile|Silk/i.test(navigator.userAgent);
+
 function route() {
   const h = location.hash;
   const j = /^#j=(.+)$/.exec(h);
@@ -1814,9 +1936,17 @@ function route() {
   const p = /^#p=(.+)$/.exec(h);
   if (p) { manualAnswer(p[1]); return; }        // older QR: manual only
   const m = /^#c=([A-Za-z0-9]+)/.exec(h);
-  if (m) { show('camera'); $('#codeIn').value = m[1].toUpperCase(); return; }
+  if (m) {
+    show('camera'); camStage('card');
+    $('#camJoin').hidden = false;
+    $('#codeIn').value = m[1].toUpperCase();
+    return;
+  }
   if (h === '#v') { startViewer(); return; }
-  show('home');
+  if (h === '#cam') { startPhoneScanner(); return; }
+  if (h === '#home') { show('home'); return; }
+  dbg('route', isHandheld() ? 'handheld -> scanner' : 'desktop -> viewer');
+  if (isHandheld()) startPhoneScanner(); else startViewer();
 }
 
 addEventListener('hashchange', () => { dbg('route', 'hashchange ->', location.hash.slice(0, 24) + '…'); route(); });

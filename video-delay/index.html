@@ -30,21 +30,83 @@
 </head>
 <body>
 
-<!-- ============================ home ============================ -->
-<section id="home" class="view">
+<!-- ===================== role picker (fallback only) ===================== -->
+<section id="home" class="view" hidden>
   <div class="card">
     <h1>Video Delay</h1>
     <p class="sub">Your phone's camera on your PC screen, <b>N seconds late</b>.</p>
     <div class="pick">
-      <button id="goViewer" class="big"><span class="emo">🖥️</span><span class="lbl">Viewer</span><small>this device shows the delayed video</small></button>
-      <button id="goCamera" class="big"><span class="emo">📱</span><span class="lbl">Camera</span><small>this device sends its camera</small></button>
+      <button id="goViewer" class="big"><span class="emo">🖥️</span><span class="lbl">Viewer</span><small>show the delayed video here</small></button>
+      <button id="goCamera" class="big"><span class="emo">📱</span><span class="lbl">Camera</span><small>send this device's camera</small></button>
     </div>
-    <p class="hint">Open <b>Viewer</b> on the PC first — it shows a 6-character code. Then open this page on the phone, tap <b>Camera</b> and type the code.</p>
+    <p class="hint">Normally you never see this page — a desktop opens the Viewer
+      and a phone opens the scanner automatically.</p>
   </div>
 </section>
 
-<!-- ============================ viewer ============================ -->
+<!-- ============================== viewer ============================== -->
 <section id="viewer" class="view" hidden>
+
+  <!-- everything here is replaced by the video once a phone connects -->
+  <div class="hero" id="pairHero">
+    <h2 id="heroTitle">Scan this with your phone</h2>
+    <div id="mvQr" class="qrbox"></div>
+    <p class="pairtxt" id="mvQrNote"></p>
+
+    <div class="herobar">
+      <span class="code" id="roomCode">······</span>
+      <span id="sigState" class="pill">starting…</span>
+    </div>
+    <p class="pairtxt">no camera on the phone? open <code id="joinUrl">…</code></p>
+    <div class="grp">
+      <button id="copyLink" class="sm">Copy link</button>
+      <button id="newRoom" class="sm">New code</button>
+      <button id="mvStart" class="sm">Regenerate</button>
+      <button class="sm" data-log title="Debug log">🐞</button>
+    </div>
+
+    <details class="adv" id="vManual">
+      <summary>The phone is showing a code of its own</summary>
+      <p class="pairtxt">That means the broker could not finish the job, so the
+        phone answered the offer in the QR itself. Bring its answer back here.</p>
+      <div class="row">
+        <div class="grp">
+          <button id="mvScan">📷 Scan the phone's QR</button>
+          <span id="mvScanNote" class="pairtxt"></span>
+        </div>
+        <video id="mvCam" playsinline muted hidden></video>
+        <textarea id="mvIn" spellcheck="false" placeholder="…or paste the answer code here"></textarea>
+        <div class="grp"><button id="mvGo">Connect</button></div>
+      </div>
+      <details class="sub"><summary>…or copy this pairing code to the phone by hand</summary>
+        <textarea id="mvOffer" spellcheck="false" readonly></textarea>
+        <button id="mvOfferCopy" class="sm">Copy pairing code</button>
+      </details>
+    </details>
+
+    <details class="adv">
+      <summary>Advanced</summary>
+      <div class="row">
+        <label>ICE servers (JSON <code>RTCConfiguration</code>) — blank for defaults</label>
+        <textarea id="iceCfg" spellcheck="false" placeholder="default: Google + Cloudflare STUN, no TURN"></textarea>
+      </div>
+      <div class="row">
+        <label>Signalling WebSocket URL</label>
+        <input type="text" id="sigUrl" spellcheck="false">
+      </div>
+      <div class="row">
+        <label>Cache-bust TTL for pairing links, minutes — <b>0 means a fresh token
+          every time</b>, which is what you want while iterating. Raise it once the
+          code settles so a returning phone reuses its cache.</label>
+        <input type="number" id="cacheTtl" min="0" max="10080" step="1" value="0">
+      </div>
+      <div class="grp"><button id="advSave" class="sm">Save &amp; reload</button><button id="advReset" class="sm">Reset</button><button id="advTest" class="sm">Test the broker</button></div>
+    </details>
+
+    <button class="link" data-back data-role="camera">← this is my camera, not my screen</button>
+  </div>
+
+  <!-- revealed on connect -->
   <div class="stage" id="stage" data-layout="split">
     <div class="pane" id="paneLive">
       <video id="pip" playsinline muted></video>
@@ -80,7 +142,7 @@
     </div>
   </div>
 
-  <div class="toolbar">
+  <div class="toolbar" id="toolbar">
     <div class="grp delaygrp">
       <label for="delay">Delay</label>
       <input type="range" id="delay" min="0" max="600" step="1" value="30">
@@ -96,17 +158,7 @@
       <button id="btnSelf" title="This computer's webcam, live and delayed (C)">📷&nbsp;Self</button>
       <button id="btnMute" title="Audio on/off (U)">🔇</button>
       <button id="btnFs" title="Fullscreen (F)">⛶</button>
-      <button id="btnLog" title="Debug log">🐞</button>
-    </div>
-  </div>
-
-  <div class="pairing" id="pairing">
-    <div class="code" id="roomCode">······</div>
-    <div class="pairtxt">on the phone open <code id="joinUrl">…</code></div>
-    <div class="grp">
-      <button id="copyLink" class="sm">Copy link</button>
-      <button id="newRoom" class="sm">New code</button>
-      <span id="sigState" class="pill">connecting…</span>
+      <button id="btnLog" data-log title="Debug log">🐞</button>
     </div>
   </div>
 
@@ -124,62 +176,29 @@
     <video id="vfyCam" playsinline muted hidden></video>
     <div id="vfyNote" class="pairtxt"></div>
   </details>
-
-  <details class="adv" id="vManual">
-    <summary>Pair with a QR code</summary>
-    <div class="row">
-      <label><b>Scan this with your phone.</b> It carries the room code and a
-        complete offer, so it connects through the signalling broker if that is
-        working and finishes without one if it is not.</label>
-      <div class="grp"><button id="mvStart">Show pairing QR</button></div>
-      <div id="mvQr" class="qrbox" hidden></div>
-      <div id="mvQrNote" class="pairtxt" hidden></div>
-      <details class="sub"><summary>…or copy the pairing code across by hand</summary>
-        <textarea id="mvOffer" spellcheck="false" readonly></textarea>
-        <button id="mvOfferCopy" class="sm">Copy pairing code</button>
-      </details>
-    </div>
-    <div class="row">
-      <label><b>Only if the phone shows a code of its own</b> — that means the
-        broker did not finish the job, so bring its answer back here</label>
-      <div class="grp">
-        <button id="mvScan">📷 Scan the phone's QR</button>
-        <span id="mvScanNote" class="pairtxt"></span>
-      </div>
-      <video id="mvCam" playsinline muted hidden></video>
-      <textarea id="mvIn" spellcheck="false" placeholder="…or paste the answer code here"></textarea>
-      <div class="grp"><button id="mvGo">Connect</button></div>
-    </div>
-  </details>
-
-  <details class="adv">
-    <summary>Advanced</summary>
-    <div class="row">
-      <label>ICE servers (JSON <code>RTCConfiguration</code>) — blank for defaults</label>
-      <textarea id="iceCfg" spellcheck="false" placeholder="default: Google + Cloudflare STUN, no TURN"></textarea>
-    </div>
-    <div class="row">
-      <label>Signalling WebSocket URL</label>
-      <input type="text" id="sigUrl" spellcheck="false">
-    </div>
-    <div class="row">
-      <label>Cache-bust TTL for pairing links, minutes — <b>0 means a fresh token
-        every time</b>, which is what you want while iterating. Raise it once the
-        code settles so a returning phone reuses its cache.</label>
-      <input type="number" id="cacheTtl" min="0" max="10080" step="1" value="0">
-    </div>
-    <div class="grp"><button id="advSave" class="sm">Save &amp; reload</button><button id="advReset" class="sm">Reset</button><button id="advTest" class="sm">Test the broker</button></div>
-  </details>
-
-  <button class="link back" data-back>← back</button>
 </section>
 
-<!-- ============================ camera ============================ -->
+<!-- ============================== camera ============================== -->
 <section id="camera" class="view" hidden>
-  <div class="card">
-    <h2>📱 Camera</h2>
 
-    <div id="camJoin">
+  <!-- the phone lands here: point it at the PC -->
+  <div class="hero" id="scanHero">
+    <h2>Point at the code on your PC</h2>
+    <div class="scanwrap">
+      <video id="scanCam" playsinline muted></video>
+      <div class="reticle"></div>
+    </div>
+    <p class="pairtxt" id="scanNote">starting the camera…</p>
+    <div class="grp">
+      <button id="scanRetry" class="sm">Restart camera</button>
+      <button id="scanManual" class="sm">Type a code instead</button>
+      <button class="sm" data-log title="Debug log">🐞</button>
+    </div>
+    <button class="link" data-back data-role="viewer">← this is my screen, not my camera</button>
+  </div>
+
+  <div class="card" id="camCard">
+    <div id="camJoin" hidden>
       <label for="codeIn" class="pairtxt">Code shown on the PC</label>
       <input id="codeIn" inputmode="text" autocapitalize="characters" autocorrect="off" autocomplete="off" spellcheck="false" placeholder="ABC123" maxlength="8">
       <label class="chk" style="margin-bottom:14px"><input type="checkbox" id="mic"> send microphone audio too</label>
@@ -202,8 +221,9 @@
           <option value="8000000">8 Mbps</option>
         </select>
         <span id="camState" class="pill">…</span>
-        <button id="camLog" title="Debug log">🐞</button>
+        <button id="camLog" data-log title="Debug log">🐞</button>
       </div>
+
       <details class="adv" id="cVerify">
         <summary>Pairing security</summary>
         <div class="sas" id="cVfyCode">— — —</div>
@@ -229,8 +249,6 @@
         <div class="grp"><button id="mcCopy" class="sm">Copy answer code</button></div>
       </div>
     </details>
-
-    <button class="link back" data-back>← back</button>
   </div>
 </section>
 
