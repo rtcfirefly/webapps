@@ -885,7 +885,7 @@ function newViewerPC(remoteId, cfg) {
     if (['failed', 'closed'].includes(pc.connectionState)) { VFY.full = ''; setVfy('none', ''); }
     if (pc.connectionState === 'failed') { setSig('connection failed', 'bad'); toast('Connection failed — try again, or enable TURN'); }
     if (V.manual && ['failed', 'disconnected', 'closed'].includes(pc.connectionState) &&
-        !$('#mvStart').disabled && store.get('paired', '') === 'manual') {
+        !$('#mvStart').disabled) {
       dbg('viewer', 'manual pairing dropped - putting a fresh QR up');
       $('#vManual').open = true;
       clearTimeout(V.reoffer);
@@ -897,12 +897,12 @@ function newViewerPC(remoteId, cfg) {
 }
 
 async function handleOffer(m) {
-  // Manual pairing leaves this connection in have-local-offer, waiting for a
-  // scanned answer. A broker OFFER arriving in that window would replace it and
-  // leave the scan failing with "wrong state: stable".
-  if (V.manual && V.pc && ['have-local-offer', 'stable'].includes(V.pc.signalingState) &&
-      ['new', 'connecting', 'connected'].includes(V.pc.connectionState)) {
-    dbg('viewer', 'ignoring broker OFFER from', m.src, '- a manual pairing is in progress');
+  // The pairing QR carries both routes, so a broker offer and an outstanding
+  // manual offer coexist by design and race. Let the broker win freely -- it
+  // needs no return leg -- but never let a late offer tear down a pairing that
+  // already completed, which is what produced "wrong state: stable".
+  if (V.pc && V.pc.remoteDescription && ['connecting', 'connected'].includes(V.pc.connectionState)) {
+    dbg('viewer', 'ignoring broker OFFER from', m.src, '- already paired');
     return;
   }
   setSig('phone found \u2014 negotiating\u2026');
@@ -933,12 +933,13 @@ async function startViewer() {
   // so if the last pairing was manual, put the QR on screen immediately --
   // recovery is then one scan rather than a hunt through the panels.
   if (store.get('webcam', false)) toggleWebcam(true);
-  if (store.get('paired', '') === 'manual') {
-    $('#vManual').open = true;
-    dbg('viewer', 'last pairing was manual - regenerating the QR for a quick re-pair');
-    manualOffer();
-  }
   await connectViewerSignal();
+  // The QR is the way in, not a fallback: it carries the room code AND a
+  // standalone offer, so one scan works whether or not the broker is healthy.
+  // Generated after the broker attempt so the room code baked into it is final
+  // -- an ID-TAKEN retry can still change it up to that point.
+  $('#vManual').open = true;
+  manualOffer();
 }
 
 function renderJoin(room, why) {
@@ -1009,7 +1010,8 @@ async function connectViewerSignal() {
 
 /* ============================== CAMERA UI ============================== */
 
-const C = { sig: null, pc: null, stream: null, room: '', wake: null, retry: 0, answerTimer: 0, pendingCands: [], backoff: 1000 };
+const C = { sig: null, pc: null, stream: null, room: '', wake: null, retry: 0, answerTimer: 0,
+            fallbackOffer: null, fbTimer: 0, pendingCands: [], backoff: 1000 };
 
 async function getCam(facing, height) {
   return navigator.mediaDevices.getUserMedia({
@@ -1057,7 +1059,11 @@ function newCameraPC(dst, cfg) {
   pc.addEventListener('connectionstatechange', () => {
     const s = pc.connectionState;
     setCamState(s, s === 'connected' ? 'ok' : (s === 'failed' ? 'bad' : ''));
-    if (s === 'connected') refreshSas(pc, $('#cVfyCode'), $('#cVfyQr'));
+    if (s === 'connected') {
+      clearTimeout(C.fbTimer);
+      C.fallbackOffer = null;
+      refreshSas(pc, $('#cVfyCode'), $('#cVfyQr'));
+    }
     if (s === 'failed') negotiate().catch(() => {});
   });
   applyBitrate();
@@ -1084,6 +1090,7 @@ async function negotiate() {
   C.answerTimer = setTimeout(() => {
     if (C.pc && C.pc.remoteDescription) return;
     dbg('camera', 'no ANSWER within 6s of the offer');
+    if (C.fallbackOffer) { brokerFallback('no ANSWER within 6s'); return; }
     setCamState('the PC never answered \u2014 is the Viewer open on code ' + C.room + '?', 'bad');
   }, 6000);
 }
@@ -1135,6 +1142,7 @@ async function connectCameraSignal(renegotiate = true) {
     }
     C.backoff = Math.min(C.backoff * 2, 30000);
     C.retry = setTimeout(() => connectCameraSignal(!live()), C.backoff);
+    if (C.fallbackOffer) brokerFallback('broker socket would not open');
     return;
   }
 
@@ -1158,8 +1166,9 @@ function onCamVisible() {
   if (!C.sig) connectCameraSignal(!(C.pc && C.pc.connectionState === 'connected'));
 }
 
-async function startCamera(room) {
+async function startCamera(room, opts = {}) {
   C.room = (room || '').toUpperCase();
+  C.fallbackOffer = opts.fallbackOffer || null;
   try {
     C.stream = await getCam(store.get('facing', 'environment'), Number($('#res').value));
   } catch (e) {
@@ -1178,10 +1187,13 @@ async function startCamera(room) {
 
   C.backoff = 1000;
   await connectCameraSignal(true);
+  armBrokerFallback(10000);
 }
 
 function stopCamera() {
   clearTimeout(C.retry);
+  clearTimeout(C.fbTimer);
+  C.fallbackOffer = null;
   document.removeEventListener('visibilitychange', onCamVisible);
   C.backoff = 1000; C.pendingCands = [];
   if (C.sig) C.sig.close();
@@ -1262,7 +1274,6 @@ async function manualOffer() {
   btn.disabled = true; btn.textContent = 'gathering…';
   try {
     V.manual = true;
-    store.set('paired', 'manual');
     const pc = newViewerPC(null, MANUAL_ICE);
     pc.addTransceiver('video', { direction: 'recvonly' });
     pc.addTransceiver('audio', { direction: 'recvonly' });
@@ -1271,16 +1282,19 @@ async function manualOffer() {
     await waitIce(pc, 5000);                    // one blob, no trickle channel
     logSdp('manual offer', pc.localDescription);
 
-    const code = await pack({ k: 'o', s: forTransmit(pc.localDescription.sdp) });
-    const url = joinBase() + '#p=' + code;
+    // One code, both routes. The room lets the phone finish over the broker
+    // with no return leg at all; the offer lets it finish without a broker if
+    // that fails. Whichever completes first wins.
+    const code = await pack({ k: 'j', r: V.room, s: forTransmit(pc.localDescription.sdp) });
+    const url = joinBase() + '#j=' + code;
     $('#mvOffer').value = code;
-    dbg('manual', 'offer code', code.length + ' chars, url', url.length + ' chars');
+    dbg('manual', 'pairing code', code.length + ' chars, url', url.length + ' chars, room', V.room);
 
     const fitted = window.VDQR && VDQR.render(url, $('#mvQr'), 560);
     $('#mvQrNote').hidden = false;
     $('#mvQrNote').textContent = fitted
-      ? 'Open this with your phone\u2019s camera. It will start the camera page and produce an answer.'
-      : 'Too long for a QR on this connection \u2014 copy the offer code across instead.';
+      ? 'Scan with your phone\u2019s camera. It connects over the broker if that works, and finishes from this code if it does not.'
+      : 'Too long for a QR on this connection \u2014 copy the code across instead.';
     dbg('manual', 'QR', fitted ? 'rendered' : 'DID NOT FIT');
     btn.textContent = 'Regenerate QR';
   } catch (e) {
@@ -1319,7 +1333,46 @@ async function manualFinish(text) {
 }
 
 /* Phone side: turn an offer code into an answer, and show it back as a QR. */
-async function manualAnswer(code) {
+/* Scanned (or opened) the PC's pairing QR. The code carries a room and an
+ * offer: take the broker route first because it completes on its own, and drop
+ * to the embedded offer only if that has not connected in time. */
+async function joinFromQr(code) {
+  show('camera');
+  let o;
+  try { o = await unpack(code); }
+  catch (e) { dbg('join', 'unpack failed', e); toast('That pairing code is unreadable'); return; }
+  if (!o || !(o.k === 'j' || o.k === 'o')) { toast('That does not look like a pairing code'); return; }
+  if (!o.r) return manualAnswer(null, o.s);     // older QR: no room, manual only
+
+  dbg('join', 'scanned pairing QR: room', o.r, 'offer', (o.s || '').length + 'B - trying the broker first');
+  $('#codeIn').value = o.r;
+  await startCamera(o.r, { fallbackOffer: o.s });
+}
+
+/* The broker route did not complete. Stop trying it before answering the
+ * embedded offer: a late broker OFFER would replace the viewer's connection and
+ * strand the answer we are about to produce. */
+function brokerFallback(why) {
+  clearTimeout(C.fbTimer);
+  if (!C.fallbackOffer) { dbg('join', 'no fallback offer available:', why); return; }
+  if (C.pc && C.pc.connectionState === 'connected') return;
+  dbg('join', 'falling back to the scanned offer:', why);
+  clearTimeout(C.retry);
+  if (C.sig) { C.sig.close(); C.sig = null; }
+  const offer = C.fallbackOffer;
+  C.fallbackOffer = null;
+  toast('Broker did not complete — finishing from the scanned code');
+  setCamState('broker unavailable — using the scanned code');
+  manualAnswer(null, offer);
+}
+
+function armBrokerFallback(ms) {
+  clearTimeout(C.fbTimer);
+  if (!C.fallbackOffer) return;
+  C.fbTimer = setTimeout(() => brokerFallback('no connection after ' + Math.round(ms / 1000) + 's'), ms);
+}
+
+async function manualAnswer(code, sdpDirect) {
   show('camera');
   $('#cManual').open = true;
   $('#mcAnswerRow').hidden = true;          // re-pairing: clear the previous answer
@@ -1335,12 +1388,17 @@ async function manualAnswer(code) {
       $('#camLive').hidden = false;
       keepAwake();
     }
-    const o = await unpack(code);
-    if (!o || o.k !== 'o') { toast('That does not look like an offer code'); return; }
+    let sdp = sdpDirect;
+    if (!sdp) {
+      const o = await unpack(code);
+      if (!o || !(o.k === 'o' || o.k === 'j')) { toast('That does not look like an offer code'); return; }
+      sdp = o.s;
+    }
+    if (!sdp) { toast('That code carries no offer'); return; }
 
     setCamState('building answer\u2026');
     const pc = newCameraPC(null, MANUAL_ICE);
-    await pc.setRemoteDescription({ type: 'offer', sdp: o.s });
+    await pc.setRemoteDescription({ type: 'offer', sdp });
     slimCodecs(pc);
     await pc.setLocalDescription(await pc.createAnswer());
     await waitIce(pc, 5000);
@@ -1607,7 +1665,13 @@ function wire() {
     try { await navigator.clipboard.writeText($('#joinUrl').dataset.url); toast('Link copied'); }
     catch { toast('Copy failed — select the link manually'); }
   };
-  $('#newRoom').onclick = () => { V.manual = false; renderJoin(newRoom(), 'New code button'); connectViewerSignal(); };
+  // A new room code invalidates the code baked into the QR, so reissue it.
+  $('#newRoom').onclick = async () => {
+    V.manual = false;
+    renderJoin(newRoom(), 'New code button');
+    await connectViewerSignal();
+    manualOffer();
+  };
 
   /* --- advanced --- */
   $('#iceCfg').value = store.get('ice', '');
@@ -1724,8 +1788,10 @@ function jump(sec) {
 
 function route() {
   const h = location.hash;
+  const j = /^#j=(.+)$/.exec(h);
+  if (j) { joinFromQr(j[1]); return; }          // scanned the PC's pairing QR
   const p = /^#p=(.+)$/.exec(h);
-  if (p) { manualAnswer(p[1]); return; }        // arrived by scanning the PC's QR
+  if (p) { manualAnswer(p[1]); return; }        // older QR: manual only
   const m = /^#c=([A-Za-z0-9]+)/.exec(h);
   if (m) { show('camera'); $('#codeIn').value = m[1].toUpperCase(); return; }
   if (h === '#v') { startViewer(); return; }

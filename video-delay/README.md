@@ -73,32 +73,42 @@ small and the socket is only needed while a call is being set up — once media
 flows, the broker can vanish without affecting anything. Both sides reconnect
 with backoff. Two escape hatches if it's down or you don't want to use it:
 
-- **Manual pairing** — two steps, under *Pair manually* on both pages, and
-  entirely free of third parties. See below.
+- **The pairing QR** — carries a standalone offer as well as the room code, so
+  it finishes the connection with no broker at all if the broker is down. See
+  below.
 
 - **`signal-server.js`** — a ~20-line Deno relay speaking the same protocol.
   `deno run --allow-net signal-server.js`, then point *Advanced → Signalling
   WebSocket URL* at it.
 
-### Manual pairing, in two steps
+### Pairing: one QR, two routes
 
-1. **PC → phone, by QR.** The viewer makes a `recvonly` offer and renders it as
-   a QR holding a deep link to this page with the offer in the `#fragment`.
-   Point the phone's own camera app at it and the link opens the camera page,
-   grabs the camera and produces an answer — one tap, no scanner to write, and
-   the leg a QR *can* carry is also the one that bootstraps the phone into the
-   right state.
-2. **Phone → PC.** This direction has no such trick, so it offers both: the
-   phone shows its answer as a QR to hold up to the PC's webcam, and the same
-   answer as a copyable code. The scan button disables itself with a note where
-   `BarcodeDetector` is missing — notably Chrome on Linux — and the paste box
-   beside it always works.
+The viewer shows a QR as soon as it loads. It encodes a link to this page whose
+fragment carries **both** the room code and a complete, standalone offer, so a
+single scan works whichever way the connection ends up being made:
+
+1. **Scan it with the phone's own camera app.** The link opens the camera page,
+   which starts the camera and tries the **broker** first — that route needs no
+   return leg at all, so it just connects and you are done.
+2. **If the broker does not finish it**, the phone falls back automatically to
+   the offer embedded in the same code: it answers locally and shows its answer
+   as a QR. Bring that back with *Scan the phone's QR* on the PC (or paste the
+   code). No third party involved.
+
+The fallback fires when the broker socket will not open, when no `ANSWER` comes
+back within 6 s, or when nothing has connected within 10 s. The phone stops
+trying the broker before falling back, because a late broker offer would replace
+the viewer's connection and strand the answer it is about to produce.
+
+Both routes are live at once on the PC and race; whichever completes first wins,
+and a late arrival cannot tear down a pairing that already finished.
 
 Getting the payload small enough to scan is the whole game. `setCodecPreferences`
 pinning to VP8 does most of it (a stock Chrome offer is ~6 KB, mostly codec
 lines); the rest is `deflate-raw` + base64url, and dropping Chrome's port-9 TCP
-placeholder candidates. That lands around 900–1000 characters — a version 22–23
-QR, rendered at 560 px so each module is ~5 px. If a payload ever overflows QR
+placeholder candidates. That lands around 900 characters — a version 22 QR,
+rendered at 560 px so each module is ~5 px. Adding the room code to it cost 15
+characters and did not change the version. If a payload ever overflows QR
 capacity the code hides itself and the copyable text takes over.
 
 The QR encoder in `qr.js` is vendored from

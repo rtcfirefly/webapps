@@ -108,19 +108,22 @@
   </details>
 
   <details class="adv" id="vManual">
-    <summary>Pair manually (no signalling server)</summary>
+    <summary>Pair with a QR code</summary>
     <div class="row">
-      <label><b>Step 1</b> — point your phone's camera at this</label>
+      <label><b>Scan this with your phone.</b> It carries the room code and a
+        complete offer, so it connects through the signalling broker if that is
+        working and finishes without one if it is not.</label>
       <div class="grp"><button id="mvStart">Show pairing QR</button></div>
       <div id="mvQr" class="qrbox" hidden></div>
       <div id="mvQrNote" class="pairtxt" hidden></div>
-      <details class="sub"><summary>…or copy the offer code across by hand</summary>
+      <details class="sub"><summary>…or copy the pairing code across by hand</summary>
         <textarea id="mvOffer" spellcheck="false" readonly></textarea>
-        <button id="mvOfferCopy" class="sm">Copy offer code</button>
+        <button id="mvOfferCopy" class="sm">Copy pairing code</button>
       </details>
     </div>
     <div class="row">
-      <label><b>Step 2</b> — the answer from your phone</label>
+      <label><b>Only if the phone shows a code of its own</b> — that means the
+        broker did not finish the job, so bring its answer back here</label>
       <div class="grp">
         <button id="mvScan">📷 Scan the phone's QR</button>
         <span id="mvScanNote" class="pairtxt"></span>
@@ -189,9 +192,9 @@
     </div>
 
     <details class="adv" id="cManual" style="margin-top:14px">
-      <summary>Pair manually (no signalling server)</summary>
+      <summary>Pair by code</summary>
       <div class="row" id="mcOfferRow">
-        <label>Paste the PC's <b>offer code</b> (only if you didn't scan its QR)</label>
+        <label>Paste the PC's <b>pairing code</b> (only if you didn't scan its QR)</label>
         <textarea id="mcIn" spellcheck="false" placeholder="paste here"></textarea>
         <div class="grp"><button id="mcGo">Make answer</button></div>
       </div>
