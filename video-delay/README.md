@@ -132,6 +132,24 @@ Codec is whichever of VP8/VP9-in-WebM or H.264-in-MP4 both `MediaRecorder` and
 release, the viewer gives up and shows undelayed live video rather than a
 black rectangle.
 
+## Cache busting
+
+Pairing links carry a `?v=` token, and the loader in `index.html` propagates it
+to `app.js`, `qr.js` and `style.css`. That last part is the point: GitHub Pages
+sets its own `Cache-Control` (~10 minutes) and gives you no way to override it,
+so a token on the document alone would fetch a fresh `index.html` that still
+pulled the *old* scripts out of the phone's cache.
+
+*Advanced → Cache-bust TTL* controls how often the token changes:
+
+- **0 (default)** — a fresh token per link, so every scan is a cold load. This is
+  what you want while iterating on the code.
+- **N minutes** — the token is quantised to N, so repeat scans inside the window
+  reuse the cache. Raise it once things settle.
+
+There is no service worker and no application cache to configure; the URL is the
+only lever, which is why the TTL lives here rather than in a header.
+
 ## Deploying
 
 It's plain static files in `video-delay/` of the `webapps` repo, served by

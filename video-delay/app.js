@@ -946,7 +946,7 @@ function renderJoin(room, why) {
   if (V.room && V.room !== room) dbg('viewer', 'ROOM CODE CHANGED', V.room, '->', room, '(' + (why || 'unknown') + ')');
   V.room = room; store.set('room', room);
   $('#roomCode').textContent = room;
-  const url = location.origin + location.pathname + '#c=' + room;
+  const url = joinBase() + '#c=' + room;
   $('#joinUrl').textContent = url.replace(/^https?:\/\//, '');
   $('#joinUrl').dataset.url = url;
 }
@@ -1267,7 +1267,24 @@ async function brokerSelfTest() {
  * The PC offers (recvonly) so that the leg a QR can carry is the one that also
  * bootstraps the phone into the right page and state in a single tap.        */
 
-function joinBase() { return location.origin + location.pathname; }
+/* A pairing link opens a page on a device whose cache we do not control.
+ * GitHub Pages sets its own Cache-Control and offers no way to override it, so
+ * the only lever is the URL: a token here is propagated by the loader in
+ * index.html to app.js, qr.js and style.css, which is what actually makes a
+ * scan pick up new code.
+ *
+ * TTL 0 -- the default while iterating -- mints a fresh token per link, so every
+ * scan is a cold load. A positive TTL quantises the token to that many minutes,
+ * so repeat scans inside the window reuse the cache. */
+function bustToken() {
+  const mins = Number(store.get('cacheTtlMin', 0)) || 0;
+  if (mins <= 0) return Math.random().toString(36).slice(2, 8);
+  return Math.floor(Date.now() / (mins * 60000)).toString(36);
+}
+
+function joinBase() {
+  return location.origin + location.pathname + '?v=' + bustToken();
+}
 
 async function manualOffer() {
   const btn = $('#mvStart');
@@ -1287,6 +1304,8 @@ async function manualOffer() {
     // that fails. Whichever completes first wins.
     const code = await pack({ k: 'j', r: V.room, s: forTransmit(pc.localDescription.sdp) });
     const url = joinBase() + '#j=' + code;
+    dbg('manual', 'cache-bust token in link:', new URL(url).searchParams.get('v'),
+      '(ttl ' + (Number(store.get('cacheTtlMin', 0)) || 0) + ' min)');
     $('#mvOffer').value = code;
     dbg('manual', 'pairing code', code.length + ' chars, url', url.length + ' chars, room', V.room);
 
@@ -1676,14 +1695,16 @@ function wire() {
   /* --- advanced --- */
   $('#iceCfg').value = store.get('ice', '');
   $('#sigUrl').value = store.get('signal', '') || SIGNAL_URL;
+  $('#cacheTtl').value = Number(store.get('cacheTtlMin', 0)) || 0;
   $('#advSave').onclick = () => {
     const ice = $('#iceCfg').value.trim();
     if (ice) { try { JSON.parse(ice); } catch { toast('ICE JSON is invalid'); return; } }
     store.set('ice', ice);
     store.set('signal', $('#sigUrl').value.trim());
+    store.set('cacheTtlMin', Math.max(0, Number($('#cacheTtl').value) || 0));
     location.reload();
   };
-  $('#advReset').onclick = () => { store.set('ice', ''); store.set('signal', ''); location.reload(); };
+  $('#advReset').onclick = () => { store.set('ice', ''); store.set('signal', ''); store.set('cacheTtlMin', 0); location.reload(); };
   $('#advTest').onclick = () => brokerSelfTest();
 
   /* --- manual pairing, viewer side --- */
@@ -1800,5 +1821,8 @@ function route() {
 
 addEventListener('hashchange', () => { dbg('route', 'hashchange ->', location.hash.slice(0, 24) + '…'); route(); });
 
-wire();
-route();
+// app.js is injected from <head> by the cache-bust loader, so it can execute
+// before the body exists. It used to be a classic script at the end of body.
+function boot() { wire(); route(); }
+if (document.readyState === 'loading') addEventListener('DOMContentLoaded', boot);
+else boot();

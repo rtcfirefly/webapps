@@ -8,7 +8,25 @@
 <meta name="description" content="Phone camera on your PC screen, on a delay. WebRTC, no dependencies.">
 <title>Video Delay</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%8F%B1%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css">
+<script>
+/* Cache-bust loader. GitHub Pages serves its own Cache-Control (~10 min) and we
+   cannot change it, so a ?v= on the document alone would fetch a fresh
+   index.html that still pulled app.js and style.css out of the phone's cache.
+   Propagating the same token to every sub-resource is the only lever we have.
+   async=false keeps dynamically inserted scripts in order. */
+(function () {
+  var v = new URLSearchParams(location.search).get('v');
+  var q = v ? '?v=' + encodeURIComponent(v) : '';
+  var css = document.createElement('link');
+  css.rel = 'stylesheet'; css.href = 'style.css' + q;
+  document.head.appendChild(css);
+  ['qr.js', 'app.js'].forEach(function (s) {
+    var el = document.createElement('script');
+    el.src = s + q; el.async = false;
+    document.head.appendChild(el);
+  });
+})();
+</script>
 </head>
 <body>
 
@@ -144,6 +162,12 @@
       <label>Signalling WebSocket URL</label>
       <input type="text" id="sigUrl" spellcheck="false">
     </div>
+    <div class="row">
+      <label>Cache-bust TTL for pairing links, minutes — <b>0 means a fresh token
+        every time</b>, which is what you want while iterating. Raise it once the
+        code settles so a returning phone reuses its cache.</label>
+      <input type="number" id="cacheTtl" min="0" max="10080" step="1" value="0">
+    </div>
     <div class="grp"><button id="advSave" class="sm">Save &amp; reload</button><button id="advReset" class="sm">Reset</button><button id="advTest" class="sm">Test the broker</button></div>
   </details>
 
@@ -222,7 +246,5 @@
 </details>
 
 <div id="toast" hidden></div>
-<script src="qr.js"></script>
-<script src="app.js"></script>
 </body>
 </html>
