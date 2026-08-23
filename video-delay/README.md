@@ -216,8 +216,26 @@ sends nothing**. A broker that substituted a peer, or someone who guessed the
 room code and answered first, is rejected automatically — no comparing, no user
 decision.
 
-This needs `RTCPeerConnection.generateCertificate`. Where that is unavailable
-the app still works and falls back to the manual check below.
+That is one direction. It gives the **viewer** no reason to trust the phone —
+whoever saw the QR could have used it. So the QR also carries a **one-time token
+that never touches the broker**, and the phone echoes it back over a data
+channel on the established connection. Because that channel is inside DTLS, the
+echo can only come from the peer actually connected, and only a peer that saw
+the screen knows the value. Both ends therefore verify automatically:
+
+| | proves | how |
+|---|---|---|
+| phone → PC | this is the PC whose QR I scanned | certificate fingerprint pinned from the QR |
+| PC → phone | this peer saw my screen | one-time token echoed inside DTLS |
+
+A relay cannot launder the token by forwarding someone else's: the phone's
+fingerprint pin refuses the relayed leg before any of it happens.
+
+Typing a room code by hand skips the QR, so there is no token and the PC stays
+unverified — correctly, because nothing has been proven. Use the manual code
+below in that case. The fingerprint half needs
+`RTCPeerConnection.generateCertificate`; where that is unavailable the app still
+works and falls back to the manual check.
 
 Once connected, **Pairing security** on both pages shows a safety code — three
 groups of four letters for reading, plus a QR carrying the **entire SHA-256**.

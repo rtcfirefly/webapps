@@ -164,9 +164,10 @@
 
   <details class="adv" id="verify">
     <summary>Pairing security <span id="vfyPill" class="pill">not connected</span></summary>
-    <p class="pairtxt">Both devices derive this from the two DTLS certificate fingerprints actually
-      in use. If anyone had come between you on the signalling channel they would have to present a
-      different certificate, and the codes would differ.</p>
+    <p class="pairtxt">Verification runs in both directions on its own. The phone pins this PC's
+      certificate from the QR it scanned. This PC is satisfied when the phone echoes back, over the
+      encrypted connection, the one-time token that only appeared on this screen. The code below is
+      the manual fallback for when either automatic check is unavailable.</p>
     <div class="sas" id="vfyCode">— — —</div>
     <div id="vfyQr" class="qrbox"></div>
     <div class="grp">
@@ -225,7 +226,9 @@
       </div>
 
       <details class="adv" id="cVerify">
-        <summary>Pairing security</summary>
+        <summary>Pairing security <span id="cVfyPill" class="pill">checking…</span></summary>
+        <p class="pairtxt">Scanning the PC's QR pinned its certificate. If the machine
+          that answered had not been the one you scanned, nothing would have been sent.</p>
         <div class="sas" id="cVfyCode">— — —</div>
         <div id="cVfyQr" class="qrbox"></div>
         <p class="pairtxt">Hold this up to the PC's webcam and press

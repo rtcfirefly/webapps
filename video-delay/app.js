@@ -582,7 +582,7 @@ function maintain(d) {
 /* ------------------------------------------------- the PC's own webcam  */
 
 const CAM = { stream: null, on: false };
-const JOIN = { fp: null };      // viewer fingerprint pinned by the scanned QR
+const JOIN = { fp: null, nonce: null };   // pinned by the scanned QR; never sent to the broker
 
 /* One geometry shared by both tiles, as percentages of their pane, so they stay
  * symmetric and survive a resize of the window or a change of layout. */
@@ -683,7 +683,8 @@ async function toggleWebcam(want) {
 
 /* ============================== VIEWER UI ============================== */
 
-const V = { sig: null, pc: null, room: '', peer: null, manual: false, reoffer: 0, pendingCands: [], stats: null, statsTimer: 0 };
+const V = { sig: null, pc: null, dc: null, room: '', peer: null, manual: false, reoffer: 0,
+            nonce: '', nonces: new Set(), pendingCands: [], stats: null, statsTimer: 0 };
 
 function show(id) {
   for (const s of document.querySelectorAll('.view')) s.hidden = (s.id !== id);
@@ -896,13 +897,25 @@ function newViewerPC(remoteId, cfg) {
   pc.addEventListener('icecandidate', e => {
     if (e.candidate && V.sig && remoteId && !pc.__gathered) V.sig.send('CANDIDATE', remoteId, peerPayload({ candidate: e.candidate.toJSON() }));
   });
+  V.dc = authChannel(pc, 'viewer');
+  if (V.dc) V.dc.onmessage = (ev) => {
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.t !== 'qr') return;
+    if (m.n && V.nonces.has(m.n)) {
+      setVfy('ok', 'The phone proved over the encrypted connection that it scanned this screen.');
+      dbg('viewer', 'peer echoed a valid scan token - mutually verified');
+    } else {
+      setVfy('bad', 'The peer sent a scan token this screen never issued.');
+      dbg('viewer', 'peer echoed an UNKNOWN scan token');
+    }
+  };
   pc.addEventListener('track', e => { if (e.streams[0]) attachRemote(e.streams[0]); });
   pc.addEventListener('connectionstatechange', () => {
     updateHud();
     if (pc.connectionState === 'connected') {
       setConnected(true);
       setSig('phone connected', 'ok');
-      setVfy('pending', 'Compare with the phone, or scan its code.');
+      setVfy('pending', 'The phone checks this PC automatically from the QR. This end is confirmed when the phone presents its scan token.');
       refreshSas(pc, $('#vfyCode'), $('#vfyQr'));
     }
     if (['failed', 'closed'].includes(pc.connectionState)) { VFY.full = ''; setVfy('none', ''); }
@@ -1045,7 +1058,7 @@ async function connectViewerSignal() {
 
 /* ============================== CAMERA UI ============================== */
 
-const C = { sig: null, pc: null, stream: null, room: '', wake: null, retry: 0, answerTimer: 0,
+const C = { sig: null, pc: null, dc: null, stream: null, room: '', wake: null, retry: 0, answerTimer: 0,
             fallbackOffer: null, fbTimer: 0, pendingCands: [], backoff: 1000 };
 
 async function getCam(facing, height) {
@@ -1087,6 +1100,12 @@ function newCameraPC(dst, cfg) {
   dbg('camera', 'new RTCPeerConnection, dst =', dst || '(manual)');
   logPC(pc, 'camera');
   C.pendingCands = [];
+  C.dc = authChannel(pc, 'camera');
+  if (C.dc) C.dc.onopen = () => {
+    if (!JOIN.nonce) { dbg('camera', 'no scan token to present (code was typed, not scanned)'); return; }
+    try { C.dc.send(JSON.stringify({ t: 'qr', n: JOIN.nonce })); dbg('camera', 'presented the scan token'); }
+    catch (e) { dbg('camera', 'could not present the scan token', e); }
+  };
   for (const t of C.stream.getTracks()) pc.addTrack(t, C.stream);
   pc.addEventListener('icecandidate', e => {
     if (e.candidate && C.sig && dst && !pc.__gathered) C.sig.send('CANDIDATE', dst, peerPayload({ candidate: e.candidate.toJSON() }));
@@ -1146,6 +1165,8 @@ async function onCamMsg(ev) {
         return;
       }
       dbg('camera', 'answer matches the scanned fingerprint - verified by QR');
+      $('#cVfyPill').textContent = 'verified by QR';
+      $('#cVfyPill').className = 'pill ok';
     }
     try {
       clearTimeout(C.answerTimer);
@@ -1351,7 +1372,12 @@ async function manualOffer() {
     // One code, both routes. The room lets the phone finish over the broker
     // with no return leg at all; the offer lets it finish without a broker if
     // that fails. Whichever completes first wins.
-    const code = await pack({ k: 'j', r: V.room, s: forTransmit(pc.localDescription.sdp) });
+    // Fresh per QR, and kept in a small set so regenerating does not turn an
+    // in-flight phone's honest token into a false alarm.
+    V.nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => ALPHA[b % 32]).join('');
+    V.nonces.add(V.nonce);
+    if (V.nonces.size > 5) V.nonces.delete(V.nonces.values().next().value);
+    const code = await pack({ k: 'j', r: V.room, n: V.nonce, s: forTransmit(pc.localDescription.sdp) });
     const url = joinBase() + '#j=' + code;
     dbg('manual', 'cache-bust token in link:', new URL(url).searchParams.get('v'),
       '(ttl ' + (Number(store.get('cacheTtlMin', 0)) || 0) + ' min)');
@@ -1417,6 +1443,7 @@ async function joinFromQr(code) {
   // The fingerprint arrived over a camera, not over the broker. Anything that
   // later claims to be this viewer must present the same certificate.
   JOIN.fp = dtlsPrint({ sdp: o.s || '' });
+  JOIN.nonce = o.n || null;
   dbg('join', 'scanned pairing QR: room', o.r, 'offer', (o.s || '').length + 'B,',
     JOIN.fp ? 'pinned fingerprint ' + JOIN.fp.slice(-17) : 'NO fingerprint in the offer');
   $('#codeIn').value = o.r;
@@ -1607,6 +1634,24 @@ async function startPhoneScanner() {
 
 const VFY = { full: '', short: '', state: 'unknown' };
 
+/* The QR authenticates the viewer TO the phone: the phone reads the viewer's
+ * certificate fingerprint off a screen, out of band, and refuses anything else.
+ * Nothing in that gives the VIEWER any reason to trust the phone -- whoever saw
+ * the QR could have used it.
+ *
+ * So the QR also carries a nonce that never touches the broker, and the phone
+ * echoes it back over a data channel on the established connection. Because
+ * that channel is inside DTLS, the echo can only come from the peer actually
+ * connected, and only a peer that saw the screen knows the value. A relay that
+ * forwarded someone else's nonce cannot use it: the phone's fingerprint pin
+ * refuses the relayed leg first.
+ *
+ * Negotiated with a fixed id so it exists whichever side offered. */
+function authChannel(pc, side) {
+  try { return pc.createDataChannel('vd-auth', { negotiated: true, id: 0 }); }
+  catch (e) { dbg(side, 'auth data channel unavailable:', e.message); return null; }
+}
+
 function b32(bytes, n) {
   let bits = 0, val = 0, out = '';
   for (const b of bytes) {
@@ -1638,7 +1683,7 @@ function setVfy(state, note) {
   VFY.state = state;
   const pill = $('#vfyPill');
   if (pill) {
-    pill.textContent = { ok: 'verified', bad: 'MISMATCH', pending: 'not verified', none: 'not connected' }[state] || state;
+    pill.textContent = { ok: 'verified', bad: 'MISMATCH', pending: 'phone verified this PC…', none: 'not connected' }[state] || state;
     pill.className = 'pill' + (state === 'ok' ? ' ok' : state === 'bad' ? ' bad' : '');
   }
   if (note !== undefined) { const n = $('#vfyNote'); if (n) n.textContent = note; }
