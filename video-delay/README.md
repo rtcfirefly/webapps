@@ -279,8 +279,19 @@ someone is in the middle — stop.** The scan button disables itself where
   is already up is unaffected.
 - **"no viewer with that code"** — open the Viewer page first; it has to be
   registered before the phone offers. Codes are per-browser and persist.
-- **Connects, then fails** — usually a NAT that needs a relay. There is no TURN
-  configured by default; put your own in *Advanced → ICE servers*.
+- **Connects, then fails, and only when the two devices are on different
+  networks** — you need TURN, and no setting on this page can substitute for it.
+  STUN only tells a peer its public address; it cannot make an unreachable peer
+  reachable. Two devices behind a VPN (Cloudflare WARP, Tailscale exit nodes) or
+  behind carrier-grade NAT have no direct path at all, so ICE exhausts every
+  candidate pair and fails. Same Wi-Fi works because the host candidates reach
+  each other on the LAN without leaving it.
+
+  The debug log names this explicitly on failure: it prints the candidate types
+  gathered, and if there is no `relay` on either side it says so. Fix it by
+  putting a TURN server in *Advanced → TURN*, then tick **force relay-only** to
+  confirm the relay itself works rather than guessing whether a success came
+  from it or from a lucky direct path.
 - **Scan button greyed out on the PC** — no `BarcodeDetector` in that browser
   (Chrome on Linux doesn't ship it). Paste the answer code instead.
 - **"LIVE (no delay)" in the HUD** — no working recorder/MSE codec pair on this

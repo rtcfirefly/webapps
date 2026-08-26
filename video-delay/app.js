@@ -95,9 +95,42 @@ function logPC(pc, tag) {
     dbg(tag, 'connectionState =', pc.connectionState);
     if (pc.connectionState === 'connected') logSelectedPair(pc, tag);
   });
-  pc.addEventListener('icecandidate', e => dbg(tag, 'local candidate:', e.candidate ? candInfo(e.candidate) : '(gathering complete)'));
+  pc.__types = new Set();
+  pc.addEventListener('icecandidate', e => {
+    if (e.candidate) pc.__types.add(e.candidate.type || '?');
+    dbg(tag, 'local candidate:', e.candidate ? candInfo(e.candidate) : '(gathering complete)');
+  });
+  pc.addEventListener('connectionstatechange', () => {
+    if (pc.connectionState !== 'failed') return;
+    diagnoseIceFailure(pc, tag);
+  });
   pc.addEventListener('icecandidateerror', e =>
     dbg(tag, 'ICE ERROR code=' + e.errorCode, e.errorText || '', 'url=' + (e.url || '?')));
+}
+
+/* A failure with no relay candidate is not a mystery, it is a missing TURN
+ * server -- and the app cannot invent one. Say so, rather than leaving "failed"
+ * on screen and letting it read as a bug in the pairing. */
+function diagnoseIceFailure(pc, tag) {
+  const types = [...(pc.__types || [])];
+  const hasRelay = types.includes('relay');
+  const remote = (pc.remoteDescription && pc.remoteDescription.sdp) || '';
+  const remoteRelay = /typ relay/.test(remote);
+  dbg(tag, 'ICE FAILED. local candidate types:', types.join(',') || 'none',
+    '| remote offered relay:', remoteRelay);
+  if (hasRelay || remoteRelay) {
+    dbg(tag, 'a relay was available, so this is not a missing-TURN problem');
+    return;
+  }
+  dbg(tag, 'NO relay candidate on either side. Two peers that are not on the same',
+    'network generally cannot reach each other without one -- especially behind a',
+    'VPN or carrier-grade NAT. Add a TURN server in Advanced.');
+  if (tag === 'viewer') {
+    setSig('no route — needs TURN', 'bad');
+    toast('No direct path and no TURN server. Add one in Advanced → TURN, or put both devices on the same network.');
+  } else {
+    setCamState('no route — needs TURN', 'bad');
+  }
 }
 
 async function logSelectedPair(pc, tag) {
@@ -129,7 +162,9 @@ function logHeader() {
     'ua        : ' + navigator.userAgent,
     'secure    : ' + window.isSecureContext + '   screen: ' + screen.width + 'x' + screen.height + '@' + devicePixelRatio,
     'broker    : ' + SIGNAL_URL,
-    'ice       : ' + (store.get('ice', '') ? 'custom' : 'default (google + cloudflare STUN, no TURN)'),
+    'ice       : ' + (store.get('ice', '') ? 'custom JSON'
+      : 'STUN' + (turnServer() ? ' + TURN ' + turnServer().urls.join(',') : ', NO TURN')
+        + (store.get('forceRelay', false) ? ' [relay-only]' : '')),
     'MSImpl    : ' + (MSImpl ? MSImpl.name : 'none') + '   MediaRecorder: ' + (window.MediaRecorder ? 'yes' : 'no'),
     'codecs    : ' + cap.join('  ') + '   (R=MediaRecorder M=MediaSource)',
     'room      : ' + (V.room || C.room || '-'),
@@ -161,10 +196,28 @@ const DEFAULT_ICE = {
   iceCandidatePoolSize: 2,
 };
 
+function turnServer() {
+  const url = (store.get('turnUrl', '') || '').trim();
+  if (!url) return null;
+  const s = { urls: url.split(/[,\s]+/).filter(Boolean) };
+  const u = (store.get('turnUser', '') || '').trim();
+  const p = (store.get('turnPass', '') || '').trim();
+  if (u) s.username = u;
+  if (p) s.credential = p;
+  return s;
+}
+
 function iceConfig() {
   const raw = (store.get('ice', '') || '').trim();
   if (raw) { try { return JSON.parse(raw); } catch { toast('ICE JSON is invalid — using defaults'); } }
-  return DEFAULT_ICE;
+  const turn = turnServer();
+  const cfg = Object.assign({}, DEFAULT_ICE, {
+    iceServers: turn ? DEFAULT_ICE.iceServers.concat([turn]) : DEFAULT_ICE.iceServers,
+  });
+  // Relay-only proves a TURN server actually works, instead of leaving you
+  // guessing whether a success came from the relay or from a lucky direct path.
+  if (store.get('forceRelay', false) && turn) cfg.iceTransportPolicy = 'relay';
+  return cfg;
 }
 
 /* Chrome offers VP8, VP9, AV1 and four H.264 profiles, each with its own
@@ -1949,15 +2002,27 @@ function wire() {
   $('#iceCfg').value = store.get('ice', '');
   $('#sigUrl').value = store.get('signal', '') || SIGNAL_URL;
   $('#cacheTtl').value = Number(store.get('cacheTtlMin', 0)) || 0;
+  $('#turnUrl').value = store.get('turnUrl', '');
+  $('#turnUser').value = store.get('turnUser', '');
+  $('#turnPass').value = store.get('turnPass', '');
+  $('#forceRelay').checked = !!store.get('forceRelay', false);
   $('#advSave').onclick = () => {
     const ice = $('#iceCfg').value.trim();
     if (ice) { try { JSON.parse(ice); } catch { toast('ICE JSON is invalid'); return; } }
     store.set('ice', ice);
     store.set('signal', $('#sigUrl').value.trim());
     store.set('cacheTtlMin', Math.max(0, Number($('#cacheTtl').value) || 0));
+    store.set('turnUrl', $('#turnUrl').value.trim());
+    store.set('turnUser', $('#turnUser').value.trim());
+    store.set('turnPass', $('#turnPass').value.trim());
+    store.set('forceRelay', $('#forceRelay').checked);
     location.reload();
   };
-  $('#advReset').onclick = () => { store.set('ice', ''); store.set('signal', ''); store.set('cacheTtlMin', 0); location.reload(); };
+  $('#advReset').onclick = () => {
+    for (const k of ['ice', 'signal', 'turnUrl', 'turnUser', 'turnPass']) store.set(k, '');
+    store.set('cacheTtlMin', 0); store.set('forceRelay', false);
+    location.reload();
+  };
   $('#advTest').onclick = () => brokerSelfTest();
 
   /* --- manual pairing, viewer side --- */
