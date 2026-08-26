@@ -609,6 +609,35 @@ function maintain(d) {
 const CAM = { stream: null, on: false };
 const JOIN = { fp: null, nonce: null };   // pinned by the scanned QR; never sent to the broker
 
+/* The phone spends a whole session on a tripod, so the viewer should say when it
+ * is about to die rather than the set ending because the camera did. Sent over
+ * the auth data channel, which is already authenticated and encrypted, and only
+ * ever to the paired peer -- battery level is a fingerprinting vector, which is
+ * why Firefox and Safari dropped the API, so it should not go anywhere else. */
+async function reportBattery() {
+  clearInterval(reportBattery.timer);
+  if (!navigator.getBattery) { dbg('camera', 'no Battery Status API in this browser'); return; }
+  let b;
+  try { b = await navigator.getBattery(); }
+  catch (e) { dbg('camera', 'getBattery failed', e); return; }
+
+  let last = null;
+  const push = () => {
+    if (!C.dc || C.dc.readyState !== 'open') return;
+    const msg = { t: 'batt', v: PROTO, pct: Math.round(b.level * 100), charging: !!b.charging };
+    try { C.dc.send(JSON.stringify(msg)); } catch { return; }
+    const now = msg.pct + (msg.charging ? '+' : '');
+    if (now !== last) { dbg('camera', 'battery', now); last = now; }
+  };
+  if (!reportBattery.bound) {
+    b.addEventListener('levelchange', push);
+    b.addEventListener('chargingchange', push);
+    reportBattery.bound = true;
+  }
+  push();
+  reportBattery.timer = setInterval(push, 60000);   // a heartbeat, in case an event is missed
+}
+
 /* One geometry shared by both tiles, as percentages of their pane, so they stay
  * symmetric and survive a resize of the window or a change of layout. */
 const PIP = Object.assign({ x: 62, y: 66, w: 34 }, store.get('pip', {}));
@@ -709,7 +738,8 @@ async function toggleWebcam(want) {
 /* ============================== VIEWER UI ============================== */
 
 const V = { sig: null, pc: null, dc: null, room: '', peer: null, manual: false, reoffer: 0,
-            nonce: '', nonces: new Set(), pendingCands: [], stats: null, statsTimer: 0 };
+            nonce: '', nonces: new Set(), batt: null, battWarned: false,
+            pendingCands: [], stats: null, statsTimer: 0 };
 
 function show(id) {
   for (const s of document.querySelectorAll('.view')) s.hidden = (s.id !== id);
@@ -863,7 +893,12 @@ function updateHud() {
     if (!D.live) bits.push('replay −' + (end - video.currentTime).toFixed(1) + 's');
   }
   if (D.bypass) bits.push('LIVE (no delay)');
-  hud.innerHTML = bits.map(b => '<span>' + b + '</span>').join('');
+  if (V.batt) {
+    const low = V.batt.pct <= 15 && !V.batt.charging;
+    bits.push([(V.batt.charging ? '⚡' : '🔋') + ' ' + V.batt.pct + '%', low ? 'low' : '']);
+  }
+  const chip = (text, cls) => '<span' + (cls ? ' class="' + cls + '"' : '') + '>' + text + '</span>';
+  hud.innerHTML = bits.map(b => Array.isArray(b) ? chip(b[0], b[1]) : chip(b)).join('');
 }
 
 function attachRemote(stream) {
@@ -925,6 +960,19 @@ function newViewerPC(remoteId, cfg) {
   V.dc = authChannel(pc, 'viewer');
   if (V.dc) V.dc.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.t === 'batt') {
+      const was = V.batt && V.batt.pct;
+      V.batt = { pct: m.pct, charging: !!m.charging, at: now() };
+      if (was !== m.pct) dbg('viewer', 'phone battery', m.pct + '%', m.charging ? '(charging)' : '');
+      // One warning per crossing, not one per update.
+      if (m.pct <= 15 && !m.charging && !V.battWarned) {
+        V.battWarned = true;
+        toast('Phone battery at ' + m.pct + '% — plug it in before the next set');
+      }
+      if (m.pct > 25 || m.charging) V.battWarned = false;
+      updateHud();
+      return;
+    }
     if (m.t !== 'qr') return;
     if (typeof m.v === 'number' && m.v !== PROTO) {
       setVfy('pending', 'The phone is on a different build (v' + m.v + ' vs v' + PROTO + '). Reload both — this is not a security failure.');
@@ -960,6 +1008,7 @@ function newViewerPC(remoteId, cfg) {
     if (['disconnected', 'closed', 'failed'].includes(pc.connectionState)) {
       setSig('phone disconnected', 'bad');
       setConnected(false);
+      V.batt = null; V.battWarned = false;   // a stale reading is worse than none
     }
   });
   return pc;
@@ -1132,6 +1181,7 @@ function newCameraPC(dst, cfg) {
   C.pendingCands = [];
   C.dc = authChannel(pc, 'camera');
   if (C.dc) C.dc.onopen = () => {
+    reportBattery();
     if (!JOIN.nonce) { dbg('camera', 'no scan token to present (code was typed, not scanned)'); return; }
     try { C.dc.send(JSON.stringify({ t: 'qr', v: PROTO, n: JOIN.nonce })); dbg('camera', 'presented the scan token'); }
     catch (e) { dbg('camera', 'could not present the scan token', e); }
@@ -1292,6 +1342,7 @@ async function startCamera(room, opts = {}) {
 
 function stopCamera() {
   clearTimeout(C.retry);
+  clearInterval(reportBattery.timer);
   clearTimeout(C.fbTimer);
   C.fallbackOffer = null;
   document.removeEventListener('visibilitychange', onCamVisible);

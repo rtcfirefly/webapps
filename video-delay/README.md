@@ -33,6 +33,12 @@ watch yourself half a minute ago.
 | **Mirror** | flip horizontally — for practising in front of it |
 | **Layout** | **split** (live left, delayed right), **delayed only**, or a corner live thumbnail |
 | **Self** | this computer's webcam inset into each pane — live inside live, delayed inside delayed |
+
+The HUD (bottom-left) also shows the **phone's battery**, sent over the same
+authenticated data channel that carries the pairing token — useful when the
+phone spends a whole session on a tripod. It turns red below 15 % and warns
+once. Needs `navigator.getBattery`, which Chrome has and Firefox and Safari
+deliberately removed; where it is missing the chip simply does not appear.
 | **⛶** | fullscreen |
 
 In **fullscreen** the toolbar is gone, so a control bar inside the video
