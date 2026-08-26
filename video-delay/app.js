@@ -286,8 +286,28 @@ async function squeeze(bytes, fmt) {
 async function expand(bytes, fmt) {
   return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream(fmt))).arrayBuffer());
 }
+/* Everything that crosses between the two devices carries this. Three payload
+ * shapes changed in quick succession during development and a stale peer failed
+ * as "MISMATCH" or "not a pairing code" -- indistinguishable from an attack, and
+ * alarming in exactly the feature where a false alarm is most expensive. A
+ * version says "reload, this is not an attack" in one line. */
+const PROTO = 2;
+
+// A build skew is not a bad code; say so plainly instead of nesting it inside
+// "could not read that code", which sends people hunting for the wrong problem.
+const codeError = (e) => toast(e && e.name === 'ProtoError' ? e.message : 'Could not read that code: ' + e.message);
+
+class ProtoError extends Error {
+  constructor(theirs) {
+    super(theirs > PROTO
+      ? 'That device is running a NEWER build — reload this one'
+      : 'That device is running an OLDER build — reload both (bump ?v= if it sticks)');
+    this.name = 'ProtoError';
+  }
+}
+
 async function pack(obj) {
-  const bytes = new TextEncoder().encode(JSON.stringify(obj));
+  const bytes = new TextEncoder().encode(JSON.stringify(Object.assign({ v: PROTO }, obj)));
   if (!window.CompressionStream) return 'J' + B64.enc(bytes);
   return 'D' + B64.enc(await squeeze(bytes, 'deflate-raw'));
 }
@@ -300,7 +320,12 @@ async function unpack(str) {
   const body = B64.dec(s.slice(1));
   const fmt = s[0] === 'D' ? 'deflate-raw' : s[0] === 'Z' ? 'gzip' : null;
   const json = fmt ? await expand(body, fmt) : body;
-  return JSON.parse(new TextDecoder().decode(json));
+  const obj = JSON.parse(new TextDecoder().decode(json));
+  // Absent means it predates versioning; those builds are long gone from both
+  // devices, so treat it as v1 and let the shape checks reject it normally.
+  const theirs = obj && typeof obj.v === 'number' ? obj.v : 1;
+  if (theirs !== PROTO) { dbg('proto', 'payload version', theirs, 'but we speak', PROTO); throw new ProtoError(theirs); }
+  return obj;
 }
 
 /* Manual pairing means the two devices are in the same room by definition --
@@ -901,6 +926,11 @@ function newViewerPC(remoteId, cfg) {
   if (V.dc) V.dc.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.t !== 'qr') return;
+    if (typeof m.v === 'number' && m.v !== PROTO) {
+      setVfy('pending', 'The phone is on a different build (v' + m.v + ' vs v' + PROTO + '). Reload both — this is not a security failure.');
+      dbg('viewer', 'scan token from protocol v' + m.v + ', we speak v' + PROTO);
+      return;
+    }
     if (m.n && V.nonces.has(m.n)) {
       setVfy('ok', 'The phone proved over the encrypted connection that it scanned this screen.');
       dbg('viewer', 'peer echoed a valid scan token - mutually verified');
@@ -1103,7 +1133,7 @@ function newCameraPC(dst, cfg) {
   C.dc = authChannel(pc, 'camera');
   if (C.dc) C.dc.onopen = () => {
     if (!JOIN.nonce) { dbg('camera', 'no scan token to present (code was typed, not scanned)'); return; }
-    try { C.dc.send(JSON.stringify({ t: 'qr', n: JOIN.nonce })); dbg('camera', 'presented the scan token'); }
+    try { C.dc.send(JSON.stringify({ t: 'qr', v: PROTO, n: JOIN.nonce })); dbg('camera', 'presented the scan token'); }
     catch (e) { dbg('camera', 'could not present the scan token', e); }
   };
   for (const t of C.stream.getTracks()) pc.addTrack(t, C.stream);
@@ -1436,7 +1466,7 @@ async function joinFromQr(code) {
   camStage('card');
   let o;
   try { o = await unpack(code); }
-  catch (e) { dbg('join', 'unpack failed', e); toast('That pairing code is unreadable'); return; }
+  catch (e) { dbg('join', 'unpack failed', e); codeError(e); return; }
   if (!o || !(o.k === 'j' || o.k === 'o')) { toast('That does not look like a pairing code'); return; }
   if (!o.r) return manualAnswer(null, o.s);     // older QR: no room, manual only
 
@@ -1517,7 +1547,7 @@ async function manualAnswer(code, sdpDirect) {
     $('#mcAnswerRow').scrollIntoView({ behavior: 'smooth', block: 'center' });
   } catch (e) {
     dbg('manual', 'answer failed', e);
-    toast('Pairing failed: ' + e.message);
+    codeError(e);
   }
 }
 
@@ -1679,6 +1709,10 @@ async function computeSas(pc) {
   return { full, short: full.slice(0, 12).replace(/(.{4})(.{4})(.{4})/, '$1 $2 $3') };
 }
 
+// What actually goes in the safety QR: the digest, tagged, so the scanner can
+// tell "different build" from "different certificate".
+function sasWire(full) { return 'vd' + PROTO + ':' + full; }
+
 function setVfy(state, note) {
   VFY.state = state;
   const pill = $('#vfyPill');
@@ -1695,13 +1729,23 @@ async function refreshSas(pc, codeEl, qrEl) {
   if (!sas) { if (codeEl) codeEl.textContent = '— — —'; if (qrEl) qrEl.hidden = true; return null; }
   VFY.full = sas.full; VFY.short = sas.short;
   if (codeEl) codeEl.textContent = sas.short;
-  if (qrEl) VDQR.render(sas.full, qrEl, 300);
+  if (qrEl) VDQR.render(sasWire(sas.full), qrEl, 300);
   dbg('verify', 'safety code', sas.short);
   return sas;
 }
 
 function verifyScanned(text) {
-  const got = (text || '').trim().toUpperCase();
+  let got = (text || '').trim();
+  const tag = /^vd(\d+):(.*)$/i.exec(got);
+  if (tag) {
+    if (Number(tag[1]) !== PROTO) {
+      setVfy('pending', 'That phone is on a different build (v' + tag[1] + ' vs v' + PROTO + '). Reload both — this is not a security failure.');
+      toast('Different build, not a mismatch — reload both devices');
+      return;
+    }
+    got = tag[2];
+  }
+  got = got.toUpperCase();
   if (!VFY.full) { toast('No safety code yet — connect first'); return; }
   if (got === VFY.full) {
     setVfy('ok', 'The phone reported the same fingerprints. Nobody is in the middle.');
@@ -1870,14 +1914,14 @@ function wire() {
   $('#mvOfferCopy').onclick = () => navigator.clipboard.writeText($('#mvOffer').value).then(() => toast('Offer code copied'), () => toast('Copy failed'));
   $('#mvScan').onclick = () => startScan({
     video: $('#mvCam'), btn: $('#mvScan'),
-    onResult: text => { $('#mvIn').value = text; manualFinish(text).catch(e => toast('Could not use that code: ' + e.message)); },
+    onResult: text => { $('#mvIn').value = text; manualFinish(text).catch(codeError); },
   }).catch(e => toast('Scanner failed: ' + e.message));
 
   $('#vfyScan').onclick = () => startScan({
     video: $('#vfyCam'), btn: $('#vfyScan'), onResult: verifyScanned,
   }).catch(e => toast('Scanner failed: ' + e.message));
   $('#vfyRefresh').onclick = () => refreshSas(V.pc, $('#vfyCode'), $('#vfyQr'));
-  $('#mvGo').onclick = () => manualFinish($('#mvIn').value).catch(e => toast('Could not read that code: ' + e.message));
+  $('#mvGo').onclick = () => manualFinish($('#mvIn').value).catch(codeError);
   scannerAvailable().then(ok => {
     $('#mvScan').disabled = !ok;
     $('#vfyScan').disabled = !ok;
