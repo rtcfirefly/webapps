@@ -254,3 +254,26 @@ details.sub[open] summary { margin-bottom: 8px; }
   text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
 .tgrid input { width: 100%; text-align: right; }
 .timercfg .chk { margin-bottom: 8px; font-size: 13px; }
+
+/* ---- rep detection ---------------------------------------------------- */
+/* Both in-stage bars share one top-centre column, so adding the second cannot
+   land it on top of the first or on a pane tag. */
+.topbars { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.timerbar, .repbar { position: static; transform: none; }
+.repbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: #000b; border: 1px solid #ffffff24; border-radius: 999px; backdrop-filter: blur(6px); }
+.repbar .ttime { min-width: 48px; color: var(--accent); }
+.repbar button { padding: 8px 12px; font-size: 13px; background: #ffffff14; border-color: #ffffff24; }
+.repbar[data-live="1"] { border-color: var(--accent); }
+
+#repcfg { top: 130px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.grid2 label { display: flex; flex-direction: column; gap: 4px; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+.repgal { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px;
+  max-height: 34dvh; overflow: auto; margin-top: 10px; }
+.repgal figure { margin: 0; background: #0b0d10; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.repgal img { width: 100%; display: block; }
+.repgal figcaption { font: 10px/1.6 ui-monospace, monospace; text-align: center; color: var(--dim); }
+.repgal a { color: var(--accent); text-decoration: none; }

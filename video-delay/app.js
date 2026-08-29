@@ -3,8 +3,8 @@
 // Stamped by release.sh, and matched against version.txt at runtime. The page
 // knows what it IS; version.txt says what is CURRENT; a difference means this
 // tab is running stale code.
-const BUILD = '20260829-161553';
-const FILES = { js: '87e95ac1c311', css: '869ee0ebf48c', html: '493326c4fdce' };
+const BUILD = '20260829-193517';
+const FILES = { js: '900311c6dd52', css: '582d952027bf', html: '78b0a6c7072f' };
 /* ------------------------------------------------------------------------
  * video-delay — phone camera -> PC screen, on a delay. Zero dependencies.
  *
@@ -1208,6 +1208,7 @@ function updateHud() {
     if (!D.live) bits.push('replay −' + (end - video.currentTime).toFixed(1) + 's');
   }
   if (D.bypass) bits.push('LIVE (no delay)');
+  if (REP.on || REP.reps.length) bits.push(['\u25C9 ' + REP.reps.length + ' reps', REP.on ? '' : 'idle']);
   if (V.batt) {
     const low = V.batt.pct <= 15 && !V.batt.charging;
     bits.push([(V.batt.charging ? '⚡' : '🔋') + ' ' + V.batt.pct + '%', low ? 'low' : '']);
@@ -2338,7 +2339,10 @@ function enterStep(i, announce) {
   T.endAt = Date.now() + step.dur * 1000;
   T.lastBeep = -1;
   if (announce) {
-    if (step.type === 'work') { beep(880, 0.28, 0, 0.3); say('Work' + (step.round ? ', round ' + step.round : '')); }
+    if (step.type === 'work') {
+      beep(880, 0.28, 0, 0.3); say('Work' + (step.round ? ', round ' + step.round : ''));
+      if (!$('#repbar').hidden && repCfg().followTimer) startReps('work phase started');
+    } else if (!$('#repbar').hidden && repCfg().followTimer) stopReps('phase is not work');
     else if (step.type === 'rest') { beep(520, 0.3, 0, 0.3); say('Rest'); }
     else { beep(660, 0.2); say('Get ready'); }
   }
@@ -2366,6 +2370,7 @@ function tickTimerInner() {
   if (T.endAt - Date.now() > 0) return;
 
   const finished = step;
+  if (finished.type === 'work' && !$('#repbar').hidden && repCfg().followTimer) stopReps('work phase ended');
   const next = T.queue[T.idx + 1];
   // Replaying only makes sense if a rest follows. With rest = 0 the next set
   // starts immediately, so a rewind would leave the athlete watching the last
@@ -2477,6 +2482,264 @@ function wireTimer() {
   renderTimer();
 }
 
+/* ========================== REP DETECTION ==========================
+ * Runs on the VIEWER, reading #pip -- the live remote feed, before the delay.
+ * The phone is on a tripod for a whole session and its battery is the thing
+ * that ends sessions, so none of this touches it.
+ *
+ * The detector itself lives in reps.js and is pure: scalars in, reps out. That
+ * is what lets the harness assert an exact count against a synthetic signal
+ * rather than hoping a screenshot looks right. */
+
+const REP = {
+  on: false, timer: 0, det: null, sampler: null, axis: 'cy', mode: 'auto',
+  warm: [], reps: [], ring: [], ringTimer: 0,
+  rec: null, chunks: [], bytes: 0, pendingRep: null,
+};
+
+const RING_MS = 4000;          // enough history to reach back to a rep's start
+const RING_HZ = 10;
+const CLIP_BUDGET = 120 * 1048576;
+
+function repCfg() {
+  return {
+    mode: $('#repEx').value || 'auto',
+    travel: Math.max(0.15, (Number($('#repSens').value) || 40) / 100),
+    followTimer: $('#repAuto').checked,
+    clips: $('#repClips').checked,
+  };
+}
+
+function saveRepCfg() {
+  const c = repCfg();
+  store.set('reps', { mode: c.mode, sens: Number($('#repSens').value) || 40,
+                      followTimer: c.followTimer, clips: c.clips });
+}
+
+/* A rolling few seconds of stills, so a completed rep can reach back to frames
+ * from its start rather than only capturing the moment it was noticed. */
+function ringPush() {
+  const v = $('#pip');
+  if (!v || v.readyState < 2 || !v.videoWidth) return;
+  const w = 640, h = Math.round(640 * v.videoHeight / v.videoWidth) || 360;
+  const cv = ringPush.cv || (ringPush.cv = document.createElement('canvas'));
+  cv.width = w; cv.height = h;
+  cv.getContext('2d').drawImage(v, 0, 0, w, h);
+  const t = now();
+  cv.toBlob(b => {
+    if (!b) return;
+    REP.ring.push({ t, url: URL.createObjectURL(b) });
+    while (REP.ring.length && t - REP.ring[0].t > RING_MS) {
+      const old = REP.ring.shift();
+      URL.revokeObjectURL(old.url);
+    }
+  }, 'image/jpeg', 0.72);
+}
+
+function frameNear(t) {
+  let best = null, bestD = Infinity;
+  for (const f of REP.ring) {
+    const d = Math.abs(f.t - t);
+    if (d < bestD) { bestD = d; best = f; }
+  }
+  return best;
+}
+
+/* One MediaRecorder kept running and cut at each rep boundary. Every stop()
+ * flushes a complete, self-contained WebM with its own keyframe -- slicing the
+ * delay line's existing chunks instead would start clips mid-GOP. */
+function clipStart(stream) {
+  if (!repCfg().clips || !stream) return;
+  const mime = pickMime(false);
+  if (!mime) return;
+  try { REP.rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 2_000_000 }); }
+  catch (e) { dbg('reps', 'clip recorder unavailable', e); REP.rec = null; return; }
+  REP.chunks = [];
+  REP.rec.ondataavailable = e => { if (e.data && e.data.size) REP.chunks.push(e.data); };
+  REP.rec.onstop = () => {
+    const rep = REP.pendingRep; REP.pendingRep = null;
+    const blob = new Blob(REP.chunks, { type: REP.chunks[0] ? REP.chunks[0].type : 'video/webm' });
+    REP.chunks = [];
+    if (rep && blob.size) {
+      rep.clip = URL.createObjectURL(blob);
+      rep.clipBytes = blob.size;
+      REP.bytes += blob.size;
+      while (REP.bytes > CLIP_BUDGET) {          // drop the oldest clip, keep its frames
+        const victim = REP.reps.find(r => r.clip);
+        if (!victim) break;
+        URL.revokeObjectURL(victim.clip);
+        REP.bytes -= victim.clipBytes || 0;
+        victim.clip = null;
+        dbg('reps', 'clip budget reached - dropped the clip for rep', victim.index);
+      }
+      renderRepGallery();
+    }
+    if (REP.on) clipStart(stream);               // immediately begin the next rep
+  };
+  REP.rec.start();
+}
+
+function clipCut(rep) {
+  REP.pendingRep = rep;
+  try { if (REP.rec && REP.rec.state !== 'inactive') REP.rec.stop(); }
+  catch (e) { dbg('reps', 'clip cut failed', e); REP.pendingRep = null; }
+}
+
+function onRep(rep) {
+  rep.frames = [rep.tStart, rep.tMid, rep.tEnd]
+    .map(frameNear).filter(Boolean).map(f => f.url);
+  REP.reps.push(rep);
+  $('#repCount').textContent = String(REP.reps.length);
+  dbg('reps', 'rep', rep.index, (rep.dur / 1000).toFixed(1) + 's,', rep.frames.length, 'frames');
+  clipCut(rep);
+  renderRepGallery();
+}
+
+function repTick() {
+  const s = REP.sampler && REP.sampler.sample();
+  if (!s) return;
+  const t = now();
+
+  if (REP.mode === 'auto' && REP.warm.length < 40) {
+    REP.warm.push(s);
+    if (REP.warm.length === 40) {
+      REP.axis = VDReps.pickAxis(REP.warm);
+      dbg('reps', 'auto-detected axis:', REP.axis);
+      $('#repState').textContent = 'auto: ' + REP.axis;
+    }
+  }
+  const value = REP.axis === 'area' ? s.area : REP.axis === 'cx' ? s.cx : s.cy;
+  const rep = REP.det.push(value, t);
+  if (rep) onRep(rep);
+}
+
+function startReps(reason) {
+  if (REP.on) return;
+  const v = $('#pip');
+  if (!v || !v.srcObject) { toast('No live feed yet — connect a phone first'); return; }
+  const c = repCfg();
+  REP.mode = c.mode;
+  REP.axis = c.mode === 'lateral' ? 'cx' : c.mode === 'burst' ? 'area' : 'cy';
+  REP.warm = [];
+  REP.sampler = VDReps.makeSampler(v);
+  REP.det = VDReps.makeRepDetector({ travel: c.travel });
+  REP.on = true;
+  REP.timer = setInterval(repTick, 50);
+  REP.ringTimer = setInterval(ringPush, 1000 / RING_HZ);
+  clipStart(v.srcObject);
+  $('#repbar').dataset.live = '1';
+  $('#repRun').textContent = 'Stop';
+  $('#repState').textContent = c.mode === 'auto' ? 'learning…' : c.mode;
+  dbg('reps', 'started:', reason, JSON.stringify(c));
+}
+
+function stopReps(reason) {
+  if (!REP.on) return;
+  REP.on = false;
+  clearInterval(REP.timer); REP.timer = 0;
+  clearInterval(REP.ringTimer); REP.ringTimer = 0;
+  try { if (REP.rec && REP.rec.state !== 'inactive') REP.rec.stop(); } catch {}
+  REP.rec = null;
+  $('#repbar').dataset.live = '0';
+  $('#repRun').textContent = 'Start';
+  $('#repState').textContent = 'idle';
+  dbg('reps', 'stopped:', reason, '- counted', REP.reps.length);
+}
+
+function clearReps() {
+  stopReps('cleared');
+  for (const r of REP.reps) {
+    (r.frames || []).forEach(u => URL.revokeObjectURL(u));
+    if (r.clip) URL.revokeObjectURL(r.clip);
+  }
+  REP.reps = []; REP.bytes = 0;
+  $('#repCount').textContent = '0';
+  renderRepGallery();
+}
+
+function renderRepGallery() {
+  const gal = $('#repGal');
+  if (!gal) return;
+  gal.innerHTML = REP.reps.map(r => {
+    const img = r.frames && r.frames[1] ? '<img src="' + r.frames[1] + '" alt="">' : '';
+    const clip = r.clip ? ' · <a href="' + r.clip + '" download="rep-' + r.index + '.webm">clip</a>' : '';
+    return '<figure>' + img + '<figcaption>#' + r.index + ' ' + (r.dur / 1000).toFixed(1) + 's' + clip + '</figcaption></figure>';
+  }).join('');
+}
+
+/* One PNG holding every captured frame, labelled by rep — one file to hand to a
+ * physio, or to paste into an LLM. */
+async function contactSheet() {
+  const rows = REP.reps.filter(r => r.frames && r.frames.length);
+  if (!rows.length) { toast('No reps captured yet'); return; }
+  const CW = 420, gap = 6, label = 26;
+  const imgs = await Promise.all(rows.map(r => Promise.all(r.frames.map(loadImg))));
+  const cols = Math.max(...imgs.map(a => a.length));
+  const ch = Math.round(CW * (imgs[0][0].naturalHeight / imgs[0][0].naturalWidth)) || 236;
+  const cv = document.createElement('canvas');
+  cv.width = cols * CW + (cols + 1) * gap;
+  cv.height = rows.length * (ch + label + gap) + gap;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#0b0d10'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.font = '600 15px ui-monospace, monospace'; ctx.textBaseline = 'middle';
+  rows.forEach((r, y) => {
+    const top = gap + y * (ch + label + gap);
+    ctx.fillStyle = '#e7edf3';
+    ctx.fillText('Rep ' + r.index + '  ·  ' + (r.dur / 1000).toFixed(1) + 's', gap, top + label / 2);
+    imgs[y].forEach((im, x) => ctx.drawImage(im, gap + x * (CW + gap), top + label, CW, ch));
+  });
+  cv.toBlob(b => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = 'reps-' + rows.length + '.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    toast(rows.length + ' reps exported');
+  }, 'image/png');
+}
+
+function loadImg(src) {
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = rej;
+    im.src = src;
+  });
+}
+
+function wireReps() {
+  const saved = store.get('reps', null);
+  if (saved) {
+    $('#repEx').value = saved.mode || 'auto';
+    $('#repSens').value = saved.sens || 40;
+    $('#repAuto').checked = saved.followTimer !== false;
+    $('#repClips').checked = saved.clips !== false;
+  }
+  $('#repRun').onclick = () => (REP.on ? stopReps('button') : startReps('button'));
+  $('#repClear').onclick = clearReps;
+  $('#repGear').onclick = () => { $('#repcfg').hidden = !$('#repcfg').hidden; };
+  $('#repClose').onclick = () => { $('#repcfg').hidden = true; saveRepCfg(); };
+  $('#repSheet').onclick = () => contactSheet().catch(e => toast('Export failed: ' + e.message));
+  $('#repDl').onclick = () => {
+    const withClips = REP.reps.filter(r => r.clip);
+    if (!withClips.length) { toast('No clips kept'); return; }
+    withClips.forEach((r, i) => setTimeout(() => {
+      const a = document.createElement('a');
+      a.href = r.clip; a.download = 'rep-' + r.index + '.webm'; a.click();
+    }, i * 300));   // browsers throttle simultaneous downloads
+    toast('Downloading ' + withClips.length + ' clips');
+  };
+  for (const id of ['#repEx', '#repSens', '#repAuto', '#repClips']) $(id).onchange = saveRepCfg;
+  $('#btnReps').onclick = () => {
+    const on = $('#repbar').hidden;
+    $('#repbar').hidden = !on;
+    if (!on) { $('#repcfg').hidden = true; stopReps('panel closed'); }
+    $('#btnReps').classList.toggle('on', on);
+    store.set('repsOpen', on);
+  };
+  if (store.get('repsOpen', false)) $('#btnReps').click();
+}
+
 /* ============================== WIRING ============================== */
 
 function wire() {
@@ -2544,6 +2807,7 @@ function wire() {
   };
   for (const b of document.querySelectorAll('[data-back]')) {
     b.onclick = () => {
+      stopReps('left the viewer');
       resetTimer();          // otherwise it beeps and speaks on a hidden view
       for (const d of LINES) stopDelay(d);
       toggleWebcam(false, false); stopCamera(); stopScan();   // false: a navigation is not "turn the self-view off"
@@ -2620,6 +2884,7 @@ function wire() {
 
   $('#btnSelf').onclick = () => toggleWebcam();
   wireTimer();
+  wireReps();
   $('#vAlertRetry').onclick = async () => {
     clearAlert('v'); V.blocked = false; V.peerNat = null;
     setSig('starting again…');
@@ -2745,6 +3010,7 @@ function wire() {
     else if (k === 'p') $('#btnLayout').click();
     else if (k === 'c') $('#btnSelf').click();
     else if (k === 't') $('#btnTimer').click();
+    else if (k === 'r') $('#btnReps').click();
     else if (k === 'u') $('#btnMute').click();
     else if (k === 'l') $('#btnLive').click();
     else if (e.key === 'ArrowLeft') { e.preventDefault(); jump(e.shiftKey ? -30 : -5); }

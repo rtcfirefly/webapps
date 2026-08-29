@@ -41,6 +41,42 @@ once. Needs `navigator.getBattery`, which Chrome has and Firefox and Safari
 deliberately removed; where it is missing the chip simply does not appear.
 | **⛶** | fullscreen |
 
+## Rep detection
+
+**◉ Reps** in the toolbar, or `R`. Runs on the **laptop**, reading the live feed
+before the delay — the phone stays a dumb camera, since its battery is what ends
+a session.
+
+No pose model and no dependency. Each frame is reduced to a 96×72 foreground
+mask against a slowly-learned background — foreground, not a frame difference,
+because a difference only says *that* something moved while the foreground says
+*where the body is*, which is what oscillates during a squat. That becomes a 1-D
+signal, and reps are the oscillation in it.
+
+Three modes, `auto` by default (it picks the axis carrying the most variation):
+
+| mode | signal | for |
+|---|---|---|
+| vertical | foreground centroid height | deadlift, RDL, SL-RDL, Jefferson curl, goblet and Spanish squat, KB swing |
+| lateral | centroid across | lateral band walk |
+| burst | foreground area | jumps 180/360 |
+
+Each detected rep captures **three key frames** (start, middle, end) from a
+rolling 4-second buffer, and **a video clip** — from a second `MediaRecorder`
+stopped and restarted at each boundary, so every clip is a complete WebM with
+its own keyframe rather than a slice starting mid-GOP.
+
+Export: **Contact sheet** builds one labelled PNG of every rep — one file to
+hand a physio or paste into an LLM. **Download clips** saves the WebMs.
+
+With *follow the timer* on it counts only during work phases.
+
+**What it cannot do:** it has no idea what a body is. It cannot assess form, and
+it cannot tell a lift from someone walking through frame — analysis is for
+whoever receives the frames. Expect it to be weakest on jumps (rotation is not a
+clean oscillation), on lateral band walk (a "rep" is genuinely ambiguous), and on
+a Spanish squat held isometrically, which has no reps to count by any method.
+
 ## Interval timer
 
 **⏱ Timer** in the toolbar, or `T`. It lives *inside* the video stage, so it is
@@ -71,7 +107,7 @@ carries the delay: `−10 −5 −1 · 30s · +1 +5 +10`. It fades out with the 
 after a few idle seconds and returns on any movement or key.
 
 Keys: `space` freeze · `f` fullscreen · `m` mirror · `p` layout · `c` self-view ·
-`t` timer · `u` audio · `l` live · `←`/`→` jump 5 s (`shift` 30 s).
+`t` timer · `r` reps · `u` audio · `l` live · `←`/`→` jump 5 s (`shift` 30 s).
 
 Freeze, Live and the jump keys act on **both** feeds at once, so the phone and
 the self-view stay aligned.

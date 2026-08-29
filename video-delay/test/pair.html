@@ -146,6 +146,50 @@ function wait(fn, label, ms = 25000) {
     if (replaying()) throw new Error('timer finished but the view was left in replay');
     say('returned to live at the end');
 
+    // ---- rep detector -----------------------------------------------------
+    // The detector is pure (scalars in, reps out), so it can be asserted to an
+    // exact count against a synthetic signal — no video, no tolerance for
+    // "looks about right", and it fails loudly if the maths regresses.
+    const R = fv.contentWindow.VDReps;
+    if (!R || !R.makeRepDetector) throw new Error('reps.js did not load into the viewer');
+    const feed = (fn, ms, opts) => {
+      const det = R.makeRepDetector(opts); let n = 0;
+      for (let t = 0; t <= ms; t += 50) if (det.push(fn(t), t)) n++;
+      return n;
+    };
+    const TAU = Math.PI * 2;
+    const cases = [
+      ['10 cycles @2s',      t => Math.sin(TAU * t / 2000) * 40 + 100, 20000, 9, 10],
+      ['10 cycles + noise',  t => Math.sin(TAU * t / 2000) * 40 + 100 + Math.sin(t * 7.3) * 4, 20000, 9, 10],
+      ['5 slow cycles @10s', t => Math.sin(TAU * t / 10000) * 40 + 100, 50000, 4, 5],
+      ['flat, no reps',      () => 100, 20000, 0, 0],
+      ['jitter, no reps',    t => 100 + Math.sin(t * 11) * 0.7, 20000, 0, 0],
+      ['drift, no reps',     t => 100 + t / 500, 20000, 0, 0],
+      // Targets hysteresis specifically. The ripple's amplitude is chosen so its
+      // SLOPE exceeds the carrier's — below that it can never reverse the
+      // signal's direction and the test proves nothing however the threshold is
+      // set. At 32 it genuinely creates false turns: 9 reps with the guard, 19
+      // without.
+      ['ripple on real reps', t => Math.sin(TAU * t / 2000) * 40 + Math.sin(TAU * t / 1000) * 32 + 100, 20000, 8, 11],
+      // Targets the minimum period: full amplitude, but 400ms a cycle. Nothing
+      // a human lifts moves like this, and only minPeriod rejects it.
+      ['too fast to be reps', t => Math.sin(TAU * t / 400) * 40 + 100, 20000, 0, 0],
+    ];
+    for (const [label, fn, ms, lo, hi] of cases) {
+      const n = feed(fn, ms);
+      say('detector: ' + label + ' -> ' + n + ' (expect ' + lo + '-' + hi + ')');
+      if (n < lo || n > hi) throw new Error('detector counted ' + n + ' for ' + label + ', expected ' + lo + '-' + hi);
+    }
+
+    // And the UI wires up against the live feed without throwing.
+    q('btnReps').click();
+    if (q('repbar').hidden) throw new Error('rep bar did not open');
+    q('repRun').click();
+    await new Promise(r => setTimeout(r, 2500));
+    say('rep detection ran on the live feed; state=' + q('repState').textContent +
+        ' count=' + q('repCount').textContent);
+    q('repRun').click();
+
     document.body.dataset.result = 'pass';
   } catch (e) {
     say('FAILED: ' + e.message);

@@ -20,7 +20,7 @@
   var css = document.createElement('link');
   css.rel = 'stylesheet'; css.href = 'style.css' + q;
   document.head.appendChild(css);
-  ['qr.js', 'app.js'].forEach(function (s) {
+  ['qr.js', 'reps.js', 'app.js'].forEach(function (s) {
     var el = document.createElement('script');
     el.src = s + q; el.async = false;
     document.head.appendChild(el);
@@ -154,6 +154,7 @@
         <div class="ovmsg" id="ovMsg">waiting for phone…</div>
       </div>
     </div>
+    <div class="topbars">
     <div class="timerbar" id="tbar" hidden data-phase="idle">
       <span class="tphase" id="tPhase">Ready</span>
       <span class="ttime" id="tTime" aria-live="polite">--</span>
@@ -162,6 +163,16 @@
       <button id="tPause" disabled>Pause</button>
       <button id="tReset">Reset</button>
       <button id="tGear" title="Timer settings">&#9881;</button>
+    </div>
+
+    <div class="repbar" id="repbar" hidden>
+      <span class="tphase">Reps</span>
+      <span class="ttime" id="repCount" aria-live="polite">0</span>
+      <span class="tround" id="repState">idle</span>
+      <button id="repRun">Start</button>
+      <button id="repClear">Clear</button>
+      <button id="repGear" title="Rep settings">&#9881;</button>
+    </div>
     </div>
 
     <div class="timercfg" id="tcfg" hidden>
@@ -174,6 +185,28 @@
       <label class="chk"><input type="checkbox" id="tVoice" checked> speak the phase, so you need not look</label>
       <label class="chk"><input type="checkbox" id="tReplay" checked> replay the set when work ends</label>
       <div class="grp"><button id="tClose" class="sm">Done</button></div>
+    </div>
+
+    <div class="timercfg" id="repcfg" hidden>
+      <div class="grid2">
+        <label>Movement
+          <select id="repEx">
+            <option value="auto">Auto-detect</option>
+            <option value="vertical">Vertical — DL, RDL, SL-RDL, Jefferson, squats, KB swing</option>
+            <option value="lateral">Lateral — band walk</option>
+            <option value="burst">Burst — jumps 180 / 360</option>
+          </select>
+        </label>
+        <label>Sensitivity<input type="range" id="repSens" min="15" max="70" step="5" value="40"></label>
+      </div>
+      <label class="chk"><input type="checkbox" id="repAuto" checked> follow the timer — count only during work</label>
+      <label class="chk"><input type="checkbox" id="repClips" checked> keep a video clip of each rep</label>
+      <div class="grp">
+        <button id="repSheet" class="sm">Contact sheet</button>
+        <button id="repDl" class="sm">Download clips</button>
+        <button id="repClose" class="sm">Done</button>
+      </div>
+      <div class="repgal" id="repGal"></div>
     </div>
 
     <div class="hud" id="hud"></div>
@@ -203,6 +236,7 @@
       <button id="btnLayout" title="Layout: split / delayed only / corner thumbnail (P)">▥&nbsp;Split</button>
       <button id="btnSelf" title="This computer's webcam, live and delayed (C)">📷&nbsp;Self</button>
       <button id="btnTimer" title="Interval timer (T)">⏱&nbsp;Timer</button>
+      <button id="btnReps" title="Rep detection (R)">◉&nbsp;Reps</button>
       <button id="btnMute" title="Audio on/off (U)">🔇</button>
       <button id="btnFs" title="Fullscreen (F)">⛶</button>
       <button id="btnLog" data-log title="Debug log">🐞</button>

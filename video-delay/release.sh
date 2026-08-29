@@ -14,7 +14,9 @@ BUILD="$(date -u +%Y%m%d-%H%M%S)"
 h() { sha256sum "$1" | cut -c1-12; }
 # app.js is hashed with its own stamp lines removed, or stamping would change
 # the hash that the stamp records.
-JS=$(sed '/^const BUILD = /d;/^const FILES = /d' "$SRC/app.js" | sha256sum | cut -c1-12)
+# Every JS file, or a change to reps.js would not trigger an update on a
+# running page.
+JS=$(cat "$SRC/app.js" "$SRC/reps.js" | sed '/^const BUILD = /d;/^const FILES = /d' | sha256sum | cut -c1-12)
 CSS=$(h "$SRC/style.css")
 HTML=$(h "$SRC/index.html")
 
@@ -27,7 +29,7 @@ grep -q "^const BUILD = '$BUILD';" "$SRC/app.js" || { echo "FAILED to stamp BUIL
 grep -q "^const FILES = { js: '$JS'" "$SRC/app.js" || { echo "FAILED to stamp FILES"; exit 1; }
 node --check "$SRC/app.js"
 
-for f in app.js qr.js index.html style.css README.md signal-server.js version.json .nojekyll .gitignore release.sh; do
+for f in app.js reps.js qr.js index.html style.css README.md signal-server.js version.json .nojekyll .gitignore release.sh; do
   cp "$SRC/$f" "$DEST/$f"
 done
 
