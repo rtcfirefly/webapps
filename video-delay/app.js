@@ -114,9 +114,24 @@ function logPC(pc, tag) {
     if (pc.connectionState === 'connected') logSelectedPair(pc, tag);
   });
   pc.__types = new Set();
+  pc.__srflx = new Map();   // local socket -> the set of public mappings seen for it
+  pc.__iface = new Set();
   pc.addEventListener('icecandidate', e => {
-    if (e.candidate) pc.__types.add(e.candidate.type || '?');
-    dbg(tag, 'local candidate:', e.candidate ? candInfo(e.candidate) : '(gathering complete)');
+    const c = e.candidate;
+    if (c) {
+      pc.__types.add(c.type || '?');
+      if (c.type === 'host' && c.address) pc.__iface.add(ifaceKind(c.address));
+      // A symmetric NAT gives a DIFFERENT public port per destination, so two
+      // STUN servers see two mappings for one local socket. That is the precise
+      // condition that makes hole punching impossible -- worth measuring rather
+      // than guessing at VPN vendors.
+      if (c.type === 'srflx' && c.relatedAddress) {
+        const key = c.relatedAddress + ':' + c.relatedPort;
+        if (!pc.__srflx.has(key)) pc.__srflx.set(key, new Set());
+        pc.__srflx.get(key).add(c.address + ':' + c.port);
+      }
+    }
+    dbg(tag, 'local candidate:', c ? candInfo(c) : '(gathering complete)');
   });
   pc.addEventListener('connectionstatechange', () => {
     if (pc.connectionState !== 'failed') return;
@@ -129,6 +144,59 @@ function logPC(pc, tag) {
 /* A failure with no relay candidate is not a mystery, it is a missing TURN
  * server -- and the app cannot invent one. Say so, rather than leaving "failed"
  * on screen and letting it read as a bug in the pairing. */
+/* Named interface classes, so a verdict can say something a person can act on
+ * rather than quoting an address. */
+function ifaceKind(a) {
+  if (!a || /\.local$/i.test(a)) return 'mdns';
+  if (a.includes(':')) return 'v6';
+  if (a === '172.16.0.2') return 'warp';           // Cloudflare WARP's fixed local address
+  const p = a.split('.').map(Number);
+  if (p[0] === 100 && p[1] >= 64 && p[1] <= 127) return 'overlay';   // CGNAT space: Tailscale et al
+  if (p[0] === 10 || (p[0] === 192 && p[1] === 168) || (p[0] === 172 && p[1] >= 16 && p[1] <= 31)) return 'lan';
+  return 'public';
+}
+
+/* What this end looks like from the outside, in terms that decide whether a
+ * direct connection is even possible. Exchanged with the peer during signalling
+ * -- not over the data channel, because when this matters the data channel is
+ * exactly what failed to open. */
+function natVerdict(pc) {
+  const types = [...(pc.__types || [])];
+  const iface = [...(pc.__iface || [])];
+  let mappings = 0;
+  for (const set of (pc.__srflx || new Map()).values()) mappings = Math.max(mappings, set.size);
+  const nat = !types.includes('srflx') ? 'blocked'
+    : mappings > 1 ? 'symmetric'
+    : 'punchable';
+  return { nat, iface, warp: WARP.on || iface.includes('warp'), overlay: iface.includes('overlay') };
+}
+
+function natEnglish(v, who) {
+  if (!v) return who + ': unknown';
+  if (v.warp) return who + ' is on Cloudflare WARP — its address is Cloudflare\u2019s, and nothing can reach it directly';
+  if (v.nat === 'symmetric') return who + ' is behind a symmetric NAT (VPN or carrier NAT) — no direct connection is possible';
+  if (v.nat === 'blocked') return who + ' could not reach any STUN server — a firewall is blocking UDP';
+  if (v.overlay) return who + ' is on an overlay network (Tailscale-style) — that should connect directly';
+  return who + ' looks directly reachable';
+}
+
+/* The verdict arrives with the offer, ~25 seconds before ICE gives up. Saying
+ * so immediately turns a long unexplained wait into an answer, and if it
+ * connects anyway the notice is replaced by the video. */
+function warnUnreachable() {
+  const them = V.peerNat;
+  if (!them || turnServer()) return;
+  const bad = them.warp || them.nat === 'symmetric' || them.nat === 'blocked';
+  if (!bad) return;
+  const why = them.warp ? 'The phone is on Cloudflare WARP'
+    : them.nat === 'blocked' ? 'The phone cannot reach any STUN server'
+    : 'The phone is behind a symmetric NAT (VPN or carrier NAT)';
+  dbg('viewer', 'early warning:', why, '- and no TURN is configured');
+  setSig('phone unreachable directly', 'bad');
+  $('#vfyNote').textContent = why + ', so a direct connection will only work on the same Wi-Fi. Turn the VPN off on the phone, or add a TURN server in Advanced.';
+  toast(why + ' — same Wi-Fi, VPN off, or add TURN');
+}
+
 function diagnoseIceFailure(pc, tag) {
   const types = [...(pc.__types || [])];
   const hasRelay = types.includes('relay');
@@ -140,14 +208,30 @@ function diagnoseIceFailure(pc, tag) {
     dbg(tag, 'a relay was available, so this is not a missing-TURN problem');
     return;
   }
-  dbg(tag, 'NO relay candidate on either side. Two peers that are not on the same',
-    'network generally cannot reach each other without one -- especially behind a',
-    'VPN or carrier-grade NAT. Add a TURN server in Advanced.');
+  const mine = natVerdict(pc);
+  const theirs = tag === 'viewer' ? V.peerNat : C.peerNat;
+  const meLabel = tag === 'viewer' ? 'This computer' : 'This phone';
+  const themLabel = tag === 'viewer' ? 'The phone' : 'The computer';
+  dbg(tag, 'NAT verdict —', natEnglish(mine, meLabel));
+  dbg(tag, 'NAT verdict —', natEnglish(theirs, themLabel));
+
+  const bad = v => v && (v.warp || v.nat === 'symmetric' || v.nat === 'blocked');
+  let who;
+  if (bad(mine) && bad(theirs)) who = 'Both devices are unreachable directly';
+  else if (bad(mine)) who = meLabel + ' is the one blocking it';
+  else if (bad(theirs)) who = themLabel + ' is the one blocking it';
+  else who = 'Neither device looks blocked, but no candidate pair worked';
+
+  const fix = (mine && mine.warp) || (theirs && theirs.warp)
+    ? 'Turn WARP off on that device, or add a TURN server in Advanced.'
+    : 'Add a TURN server in Advanced, or put both devices on the same network.';
+  dbg(tag, 'NO relay candidate on either side.', who + '.', fix);
   if (tag === 'viewer') {
-    setSig('no route — needs TURN', 'bad');
-    toast('No direct path and no TURN server. Add one in Advanced → TURN, or put both devices on the same network.');
+    setSig('no route — ' + (bad(theirs) && !bad(mine) ? 'the phone is behind a VPN/NAT' : 'needs TURN'), 'bad');
+    $('#vfyNote').textContent = who + '. ' + fix;
+    toast(who + '. ' + fix);
   } else {
-    setCamState('no route — needs TURN', 'bad');
+    setCamState('no route — ' + who, 'bad');
   }
 }
 
@@ -362,6 +446,9 @@ async function expand(bytes, fmt) {
  * as "MISMATCH" or "not a pairing code" -- indistinguishable from an attack, and
  * alarming in exactly the feature where a false alarm is most expensive. A
  * version says "reload, this is not an attack" in one line. */
+// Bump on a BREAKING payload change. Adding an optional field (like `nat`) is
+// backwards compatible -- an old peer ignores it, a new peer reads it as
+// unknown -- so it does not warrant a bump and the resulting churn.
 const PROTO = 2;
 
 // A build skew is not a bad code; say so plainly instead of nesting it inside
@@ -678,6 +765,7 @@ function maintain(d) {
 /* ------------------------------------------------- the PC's own webcam  */
 
 const CAM = { stream: null, on: false };
+const WARP = { on: false };   // set only by Cloudflare's own trace endpoint, never inferred
 const JOIN = { fp: null, nonce: null };   // pinned by the scanned QR; never sent to the broker
 
 /* The phone spends a whole session on a tripod, so the viewer should say when it
@@ -809,7 +897,7 @@ async function toggleWebcam(want) {
 /* ============================== VIEWER UI ============================== */
 
 const V = { sig: null, pc: null, dc: null, room: '', peer: null, manual: false, reoffer: 0,
-            nonce: '', nonces: new Set(), batt: null, battWarned: false,
+            nonce: '', nonces: new Set(), batt: null, battWarned: false, peerNat: null,
             pendingCands: [], stats: null, statsTimer: 0 };
 
 function show(id) {
@@ -1096,6 +1184,8 @@ async function handleOffer(m) {
   }
   setSig('phone found \u2014 negotiating\u2026');
   const early = V.pendingCands;          // candidates that beat the offer here
+  V.peerNat = m.payload.nat || null;
+  if (V.peerNat) { dbg('viewer', 'phone reports', JSON.stringify(V.peerNat)); warnUnreachable(); }
   const pc = newViewerPC(m.src);
   logSdp('viewer <- remote', m.payload.sdp);
   await pc.setRemoteDescription(m.payload.sdp);
@@ -1106,7 +1196,7 @@ async function handleOffer(m) {
   await waitIce(pc, 2500);
   pc.__gathered = true;
   logSdp('viewer -> local', pc.localDescription);
-  if (V.sig) V.sig.send('ANSWER', m.src, peerPayload({ sdp: sdpJson(pc.localDescription) }));
+  if (V.sig) V.sig.send('ANSWER', m.src, peerPayload({ sdp: sdpJson(pc.localDescription), nat: natVerdict(pc) }));
   for (const c of early) { try { await pc.addIceCandidate(c); } catch {} }
 }
 
@@ -1208,7 +1298,7 @@ async function connectViewerSignal() {
 
 /* ============================== CAMERA UI ============================== */
 
-const C = { sig: null, pc: null, dc: null, stream: null, room: '', wake: null, retry: 0, answerTimer: 0,
+const C = { sig: null, pc: null, dc: null, stream: null, room: '', wake: null, retry: 0, answerTimer: 0, peerNat: null,
             fallbackOffer: null, fbTimer: 0, pendingCands: [], backoff: 1000 };
 
 async function getCam(facing, height) {
@@ -1288,7 +1378,7 @@ async function negotiate() {
   await waitIce(pc, 2500);
   pc.__gathered = true;
   logSdp('camera -> local', pc.localDescription);
-  C.sig.send('OFFER', dst, peerPayload({ sdp: sdpJson(pc.localDescription) }));
+  C.sig.send('OFFER', dst, peerPayload({ sdp: sdpJson(pc.localDescription), nat: natVerdict(pc) }));
   setCamState('offer sent\u2026');
 
   clearTimeout(C.answerTimer);
@@ -1316,6 +1406,8 @@ async function onCamMsg(ev) {
         return;
       }
       dbg('camera', 'answer matches the scanned fingerprint - verified by QR');
+      C.peerNat = m.payload.nat || null;
+      if (C.peerNat) dbg('camera', 'viewer reports', JSON.stringify(C.peerNat));
       $('#cVfyPill').textContent = 'verified by QR';
       $('#cVfyPill').className = 'pill ok';
     }
@@ -1529,7 +1621,7 @@ async function manualOffer() {
     V.nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => ALPHA[b % 32]).join('');
     V.nonces.add(V.nonce);
     if (V.nonces.size > 5) V.nonces.delete(V.nonces.values().next().value);
-    const code = await pack({ k: 'j', r: V.room, n: V.nonce, s: forTransmit(pc.localDescription.sdp) });
+    const code = await pack({ k: 'j', r: V.room, n: V.nonce, nat: natVerdict(pc), s: forTransmit(pc.localDescription.sdp) });
     const url = joinBase() + '#j=' + code;
     dbg('manual', 'cache-bust token in link:', new URL(url).searchParams.get('v'),
       '(ttl ' + (Number(store.get('cacheTtlMin', 0)) || 0) + ' min)');
@@ -1572,6 +1664,8 @@ async function manualFinish(text) {
     return false;
   }
 
+  V.peerNat = a.nat || V.peerNat;
+  if (a.nat) dbg('manual', 'phone reports', JSON.stringify(a.nat));
   logSdp('manual answer', { type: 'answer', sdp: a.s });
   await V.pc.setRemoteDescription({ type: 'answer', sdp: a.s });
   toast('Answer accepted \u2014 connecting');
@@ -1596,6 +1690,11 @@ async function joinFromQr(code) {
   // later claims to be this viewer must present the same certificate.
   JOIN.fp = dtlsPrint({ sdp: o.s || '' });
   JOIN.nonce = o.n || null;
+  C.peerNat = o.nat || null;
+  if (C.peerNat) dbg('join', 'the PC reports', JSON.stringify(C.peerNat));
+  if (C.peerNat && (C.peerNat.warp || C.peerNat.nat === 'symmetric')) {
+    setCamState('the PC is behind a VPN/NAT — this may not connect', 'bad');
+  }
   dbg('join', 'scanned pairing QR: room', o.r, 'offer', (o.s || '').length + 'B,',
     JOIN.fp ? 'pinned fingerprint ' + JOIN.fp.slice(-17) : 'NO fingerprint in the offer');
   $('#codeIn').value = o.r;
@@ -1669,7 +1768,7 @@ async function manualAnswer(code, sdpDirect) {
     await waitIce(pc, 5000);
     logSdp('manual answer', pc.localDescription);
 
-    const ans = await pack({ k: 'a', s: forTransmit(pc.localDescription.sdp) });
+    const ans = await pack({ k: 'a', nat: natVerdict(pc), s: forTransmit(pc.localDescription.sdp) });
     $('#mcOut').value = ans;
     $('#mcAnswerRow').hidden = false;
     $('#mcOfferRow').hidden = true;
@@ -1923,6 +2022,23 @@ function wire() {
       .then(j => dbg('boot', 'broker node =', j.location || '(not reported)', JSON.stringify(j).slice(0, 120)))
       .catch(e => dbg('boot', 'broker node probe failed (CORS or offline):', e.message));
   } catch {}
+
+  // Cloudflare answers this on every WARP-attached device. It may well be
+  // blocked by CORS from this origin, in which case we fall back to inferring
+  // WARP from the candidate addresses -- but when it works it is authoritative,
+  // and the log records which happened so the guess is never mistaken for fact.
+  fetch('https://www.cloudflare.com/cdn-cgi/trace', { cache: 'no-store' })
+    .then(r => r.text())
+    .then(t => {
+      const warp = (/^warp=(\w+)/m.exec(t) || [])[1];
+      const gw = (/^gateway=(\w+)/m.exec(t) || [])[1];
+      dbg('boot', 'cloudflare trace: warp=' + (warp || '?'), 'gateway=' + (gw || '?'));
+      if (warp === 'on' || warp === 'plus') {
+        WARP.on = true;
+        dbg('boot', 'THIS DEVICE IS ON WARP — direct connections to it will not work off-LAN');
+      }
+    })
+    .catch(e => dbg('boot', 'cloudflare trace unavailable (' + e.message + ') — falling back to candidate inference'));
 
   /* --- home --- */
   $('#goViewer').onclick = () => { location.hash = '#v'; startViewer(); };
