@@ -113,6 +113,17 @@ function wait(fn, label, ms = 25000) {
     const q = V().getElementById.bind(V());
     const replaying = () => q('btnLive').classList.contains('on');
 
+    // Self-view on, so the timer's return-to-live is asserted for BOTH delay
+    // lines. Two rapid clicks also exercise the in-flight guard: the second
+    // lands inside getUserMedia and must be ignored, not start a second camera.
+    q('btnSelf').click();
+    q('btnSelf').click();
+    await wait(() => !q('pipLive').hidden ? true : null, 'the self-view to open', 15000);
+    const vLog = () => q('dbgPre').textContent;
+    const webcams = (vLog().match(/webcam on, tracks/g) || []).length;
+    say('self-view on; double-click opened ' + webcams + ' webcam(s)');
+    if (webcams !== 1) throw new Error('double-click opened ' + webcams + ' webcams — the in-flight guard regressed');
+
     q('btnTimer').click();
     if (q('tbar').hidden) throw new Error('timer bar did not open');
     q('tPrep').value = 0; q('tWork').value = 2; q('tRest').value = 2; q('tRounds').value = 2;

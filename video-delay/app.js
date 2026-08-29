@@ -3,8 +3,8 @@
 // Stamped by release.sh, and matched against version.txt at runtime. The page
 // knows what it IS; version.txt says what is CURRENT; a difference means this
 // tab is running stale code.
-const BUILD = '20260829-155229';
-const FILES = { js: '9b37c5694559', css: '869ee0ebf48c', html: '493326c4fdce' };
+const BUILD = '20260829-161553';
+const FILES = { js: '87e95ac1c311', css: '869ee0ebf48c', html: '493326c4fdce' };
 /* ------------------------------------------------------------------------
  * video-delay — phone camera -> PC screen, on a delay. Zero dependencies.
  *
@@ -19,6 +19,28 @@ const FILES = { js: '9b37c5694559', css: '869ee0ebf48c', html: '493326c4fdce' };
  * ---------------------------------------------------------------------- */
 
 const $ = (s, r = document) => r.querySelector(s);
+
+/* One guard for the whole "checked before the await that arms it" class. Every
+ * async entry point that acquires a singleton -- a camera, a socket, a peer
+ * connection -- reads state, awaits, then writes it, so a second caller passes
+ * the check before the first has written. That is how one scan opened two
+ * cameras. The flag is set SYNCHRONOUSLY on entry, which is the whole point. */
+const INFLIGHT = new Set();
+async function guarded(key, fn) {
+  if (INFLIGHT.has(key)) { dbg('guard', key, 'already in flight - ignoring the duplicate call'); return; }
+  INFLIGHT.add(key);
+  try { return await fn(); } finally { INFLIGHT.delete(key); }
+}
+
+/* Assigning location.hash fires hashchange, which calls route(), which calls
+ * the very function the caller was about to call directly. Doing both ran the
+ * whole flow twice. Everything navigates through here instead: set the hash and
+ * let route() act, or -- when the hash is already right and no event will
+ * fire -- act directly. Never both. */
+function navigate(hash) {
+  if (location.hash === hash) route();
+  else location.hash = hash;
+}
 const params = new URLSearchParams(location.search);
 const MSImpl = window.ManagedMediaSource || window.MediaSource;
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
@@ -46,9 +68,15 @@ function toast(msg, ms = 3400) {
  * connection untouched, while changed JS or markup genuinely needs the page
  * back. Most UI adjustment is the first kind. */
 
-const UPD = { timer: 0, offered: null, files: Object.assign({}, FILES) };
+const UPD = { timer: 0, offered: null, checking: false, files: Object.assign({}, FILES) };
 
 async function checkVersion() {
+  if (UPD.checking) return;      // a slow fetch must not stack up behind the poller
+  UPD.checking = true;
+  try { await checkVersionInner(); } finally { UPD.checking = false; }
+}
+
+async function checkVersionInner() {
   let v;
   try {
     const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
@@ -68,10 +96,14 @@ async function checkVersion() {
  * the video does not even blink. The new sheet is loaded before the old link is
  * dropped, so there is no unstyled flash. */
 function hotSwapCss(v) {
+  const href = 'style.css?v=' + encodeURIComponent(v.build);
+  // Without this a stylesheet slower than the poll interval appends one <link>
+  // and one toast per poll.
+  if (document.querySelector('link[href="' + href + '"]')) { UPD.files.css = v.css; return; }
   const old = document.querySelector('link[rel="stylesheet"]');
   const el = document.createElement('link');
   el.rel = 'stylesheet';
-  el.href = 'style.css?v=' + encodeURIComponent(v.build);
+  el.href = href;
   el.onload = () => {
     if (old && old !== el) old.remove();
     UPD.files.css = v.css;
@@ -842,7 +874,7 @@ function step(d) {
 
 function seekToEdge(d) {
   const { sb, video } = d;
-  if (!sb || !video || !sb.buffered.length) return;
+  if (!sb || !video || d.bypass || !sb.buffered.length) return;   // see jump(): .buffered throws once bypassed
   const start = sb.buffered.start(0), end = sb.buffered.end(sb.buffered.length - 1);
   video.currentTime = Math.max(start + 0.05, end - TARGET_LEAD);
   d.lastSeek = now();
@@ -974,7 +1006,8 @@ function pipDrag(el) {
   });
 }
 
-async function toggleWebcam(want, remember = true) {
+function toggleWebcam(want, remember = true) { return guarded('toggleWebcam', () => toggleWebcamInner(want, remember)); }
+async function toggleWebcamInner(want, remember = true) {
   const on = want === undefined ? !CAM.on : want;
   if (!on) {
     stopDelay(W);
@@ -1012,7 +1045,7 @@ async function toggleWebcam(want, remember = true) {
 /* ============================== VIEWER UI ============================== */
 
 const V = { sig: null, pc: null, dc: null, room: '', peer: null, manual: false, reoffer: 0,
-            nonce: '', nonces: new Set(), batt: null, battWarned: false, peerNat: null, blocked: false,
+            nonce: '', nonces: new Set(), batt: null, battWarned: false, peerNat: null, blocked: false, qrRoom: '',
             pendingCands: [], stats: null, statsTimer: 0 };
 
 function show(id) {
@@ -1074,7 +1107,9 @@ function setDelay(sec, persist = true) {
   if (persist) store.set('delay', sec);
 }
 
-function setLiveBtn() { $('#btnLive').classList.toggle('on', !D.live); }
+/* Any active line off the live edge, not just the phone: the self-view is on
+ * the same delay, and reporting only D hid the drift entirely. */
+function setLiveBtn() { $('#btnLive').classList.toggle('on', LINES.some(d => d.stream && !d.live)); }
 
 /* split  — live left, delayed right. Two portrait feeds on a squarish screen.
  * delayed — delayed only, full stage.
@@ -1273,6 +1308,7 @@ function newViewerPC(remoteId, cfg) {
     updateHud();
     if (pc.connectionState === 'connected') {
       setConnected(true);
+      vBackoff = 1000;
       setSig('phone connected', 'ok');
       setVfy('pending', 'The phone checks this PC automatically from the QR. This end is confirmed when the phone presents its scan token.');
       refreshSas(pc, $('#vfyCode'), $('#vfyQr'));
@@ -1368,7 +1404,8 @@ function renderJoin(room, why) {
 
 let vTaken = 0, vBackoff = 1000, vTimer = 0;
 
-async function connectViewerSignal() {
+function connectViewerSignal() { return guarded('viewerSignal', connectViewerSignalInner); }
+async function connectViewerSignalInner() {
   clearTimeout(vTimer);
   if (V.sig) { V.sig.close(); V.sig = null; }
   if ($('#viewer').hidden) return;
@@ -1393,9 +1430,20 @@ async function connectViewerSignal() {
     return;
   }
 
-  V.sig = sig; vTaken = 0; vBackoff = 1000;
+  // vBackoff is NOT reset here. A broker that accepts a socket and then drops
+  // it -- the documented behaviour of this one -- would otherwise reconnect
+  // every 1.5s forever, each cycle abandoning a peer connection mid-negotiation.
+  // It resets when a call actually establishes.
+  V.sig = sig; vTaken = 0;
   const connected = () => V.pc && V.pc.connectionState === 'connected';
   setSig(connected() ? 'phone connected' : 'waiting for phone', 'ok');
+  // ID-TAKEN is routine after a reload, and its give-up branch mints a new room
+  // code. A QR still showing the old one sends the phone to a room nobody is
+  // listening on, and it looks like a broken scan.
+  if (V.manual && V.qrRoom && V.qrRoom !== V.room) {
+    dbg('viewer', 'room changed from', V.qrRoom, 'to', V.room, '- reissuing the QR');
+    manualOffer();
+  }
 
   sig.addEventListener('msg', ev => {
     const m = ev.detail;
@@ -1488,6 +1536,7 @@ function newCameraPC(dst, cfg) {
     if (s === 'connected') {
       clearTimeout(C.fbTimer);
       clearAlert('c');
+      C.backoff = 1000;
       C.fallbackOffer = null;
       refreshSas(pc, $('#cVfyCode'), $('#cVfyQr'));
       // The pill only ever updated on the broker route's fingerprint check, so
@@ -1599,7 +1648,8 @@ function redial(why) {
   else connectCameraSignal(true).catch(e => dbg('camera', 'redial signal failed', e));
 }
 
-async function connectCameraSignal(renegotiate = true) {
+function connectCameraSignal(renegotiate = true) { return guarded('cameraSignal', () => connectCameraSignalInner(renegotiate)); }
+async function connectCameraSignalInner(renegotiate = true) {
   clearTimeout(C.retry);
   if (!C.stream) return;
   if (C.sig) { C.sig.close(); C.sig = null; }
@@ -1624,7 +1674,7 @@ async function connectCameraSignal(renegotiate = true) {
     return;
   }
 
-  C.sig = sig; C.backoff = 1000;
+  C.sig = sig;   // see the viewer: backoff resets on an established call, not an open socket
   sig.addEventListener('msg', onCamMsg);
   sig.addEventListener('down', () => {
     if (C.sig !== sig) return;
@@ -1644,7 +1694,8 @@ function onCamVisible() {
   if (!C.sig) connectCameraSignal(!(C.pc && C.pc.connectionState === 'connected'));
 }
 
-async function startCamera(room, opts = {}) {
+function startCamera(room, opts = {}) { return guarded('startCamera', () => startCameraInner(room, opts)); }
+async function startCameraInner(room, opts = {}) {
   // Idempotent by construction. Previously a second call overwrote C.stream and
   // C.sig while the first connection was still open, orphaning a live camera
   // track and a registered signalling peer that kept trickling candidates.
@@ -1792,6 +1843,7 @@ async function manualOffer() {
     V.nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => ALPHA[b % 32]).join('');
     V.nonces.add(V.nonce);
     if (V.nonces.size > 5) V.nonces.delete(V.nonces.values().next().value);
+    V.qrRoom = V.room;      // what the QR now on screen actually points at
     const code = await pack({ k: 'j', r: V.room, n: V.nonce, nat: natVerdict(pc), s: forTransmit(pc.localDescription.sdp) });
     const url = joinBase() + '#j=' + code;
     dbg('manual', 'cache-bust token in link:', new URL(url).searchParams.get('v'),
@@ -1914,7 +1966,8 @@ function armBrokerFallback(ms) {
   C.fbTimer = setTimeout(() => brokerFallback('no connection after ' + Math.round(ms / 1000) + 's'), ms);
 }
 
-async function manualAnswer(code, sdpDirect) {
+function manualAnswer(code, sdpDirect) { return guarded('manualAnswer', () => manualAnswerInner(code, sdpDirect)); }
+async function manualAnswerInner(code, sdpDirect) {
   show('camera');
   stopScan();
   camStage('card');
@@ -1985,7 +2038,8 @@ function stopScan() {
 
 /* One webcam scanner, two jobs: reading the phone's answer during manual
  * pairing, and reading its safety code afterwards. */
-async function startScan({ video, btn, onResult, facing = 'user', quiet = false }) {
+function startScan(o) { return guarded('startScan', () => startScanInner(o)); }
+async function startScanInner({ video, btn, onResult, facing = 'user', quiet = false }) {
   if (SCAN.on) { const same = SCAN.btn === btn && SCAN.video === video; stopScan(); if (same) return; }
   if (!await scannerAvailable()) {
     if (!quiet) toast('No QR scanner in this browser — compare the codes by eye instead');
@@ -2058,7 +2112,7 @@ async function startPhoneScanner() {
   const ok = await startScan({
     video: $('#scanCam'), btn: null, facing: 'environment', quiet: true, onResult: onScanned,
   });
-  if (ok) { note.textContent = 'looking for the code on your PC…'; return; }
+  if (ok !== false) { note.textContent = 'looking for the code on your PC…'; return; }
   // No BarcodeDetector, or no camera permission: the link still works if they
   // open it with the phone's own camera app, and the code can be typed.
   note.textContent = 'No scanner here. Open the PC\u2019s link with your camera app, or type the code below.';
@@ -2260,6 +2314,13 @@ function renderTimer() {
 /* The delay buffer is already holding the set that just finished. Rewinding to
  * its start the moment work ends is the whole reason a timer belongs in this
  * app rather than on a phone beside it. */
+/* The self-view is on the same delay by design; returning only the phone line
+ * to live left the two panes drifting a further work+1s apart every round. */
+function allLive() {
+  for (const d of LINES) { d.live = true; seekToEdge(d); }
+  setLiveBtn();
+}
+
 function replayLastSet(seconds) {
   if (!$('#tReplay').checked) return;
   const sb = D.sb;
@@ -2285,6 +2346,13 @@ function enterStep(i, announce) {
 }
 
 function tickTimer() {
+  // Synchronous, on a 200 ms interval. An exception escaping here leaves T.idx
+  // un-advanced and the timer wedged for good, re-throwing five times a second.
+  try { tickTimerInner(); }
+  catch (e) { dbg('timer', 'tick failed, continuing:', e && e.message); }
+}
+
+function tickTimerInner() {
   const step = T.queue[T.idx];
   if (!step) return;
   const left = Math.max(0, Math.ceil((T.endAt - Date.now()) / 1000));
@@ -2298,10 +2366,13 @@ function tickTimer() {
   if (T.endAt - Date.now() > 0) return;
 
   const finished = step;
-  if (finished.type === 'work') replayLastSet(finished.dur);
-  if (finished.type === 'rest' || (finished.type === 'work' && !$('#tReplay').checked)) {
-    D.live = true; setLiveBtn(); seekToEdge(D);
-  }
+  const next = T.queue[T.idx + 1];
+  // Replaying only makes sense if a rest follows. With rest = 0 the next set
+  // starts immediately, so a rewind would leave the athlete watching the last
+  // set while performing the next one, further behind every round.
+  const restFollows = next && next.type === 'rest';
+  if (finished.type === 'work' && restFollows) replayLastSet(finished.dur);
+  else allLive();
   enterStep(T.idx + 1, true);
 }
 
@@ -2326,6 +2397,7 @@ function startTimer() {
 function pauseTimer() {
   T.running = false;
   clearInterval(T.timer); T.timer = 0;
+  keepScreenOn(false);
   $('#tStart').disabled = false; $('#tStart').textContent = 'Resume';
   $('#tPause').disabled = true;
 }
@@ -2352,17 +2424,30 @@ function finishTimer() {
   beep(1046, 0.3, 0); beep(1318, 0.35, 0.18); beep(1568, 0.5, 0.36);
   say('Workout complete');
   keepScreenOn(false);
-  D.live = true; setLiveBtn(); seekToEdge(D);
+  allLive();
 }
 
 /* A workout is exactly the situation where nobody touches the machine for
  * minutes at a time and the screen sleeping is worst. */
 async function keepScreenOn(on) {
   try {
-    if (on && !T.wake && navigator.wakeLock) T.wake = await navigator.wakeLock.request('screen');
+    if (on && navigator.wakeLock) {
+      // The UA releases the lock on visibility loss without telling us, and the
+      // stale non-null handle then blocks every re-acquire for the rest of the
+      // session -- the display sleeps mid-set, the exact failure this prevents.
+      if (T.wake && T.wake.released) T.wake = null;
+      if (!T.wake) {
+        T.wake = await navigator.wakeLock.request('screen');
+        T.wake.addEventListener('release', () => { if (T.wake && T.wake.released) T.wake = null; });
+      }
+    }
     if (!on && T.wake) { await T.wake.release(); T.wake = null; }
   } catch (e) { dbg('timer', 'wake lock unavailable', e && e.name); }
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && T.running) keepScreenOn(true);
+});
 
 function wireTimer() {
   const saved = store.get('timer', null);
@@ -2449,8 +2534,8 @@ function wire() {
     .catch(e => dbg('boot', 'cloudflare trace unavailable (' + e.message + ') — falling back to candidate inference'));
 
   /* --- home --- */
-  $('#goViewer').onclick = () => { location.hash = '#v'; startViewer(); };
-  $('#goCamera').onclick = () => { location.hash = '#cam'; startPhoneScanner(); };
+  $('#goViewer').onclick = () => navigate('#v');
+  $('#goCamera').onclick = () => navigate('#cam');
   $('#scanRetry').onclick = () => { stopScan(); startPhoneScanner(); };
   $('#scanManual').onclick = () => {
     stopScan(); camStage('card');
@@ -2459,15 +2544,17 @@ function wire() {
   };
   for (const b of document.querySelectorAll('[data-back]')) {
     b.onclick = () => {
+      resetTimer();          // otherwise it beeps and speaks on a hidden view
       for (const d of LINES) stopDelay(d);
-      toggleWebcam(false); stopCamera(); stopScan();
+      toggleWebcam(false, false); stopCamera(); stopScan();   // false: a navigation is not "turn the self-view off"
+
       if (V.sig) V.sig.close();
       if (V.pc) { try { V.pc.close(); } catch {} }
       V.pc = null; V.sig = null; clearInterval(V.statsTimer);
       const role = b.dataset.role;
-      if (role === 'camera') { location.hash = '#cam'; startPhoneScanner(); }
-      else if (role === 'viewer') { location.hash = '#v'; startViewer(); }
-      else { location.hash = '#home'; show('home'); }
+      if (role === 'camera') navigate('#cam');
+      else if (role === 'viewer') navigate('#v');
+      else navigate('#home');
     };
   }
 
@@ -2680,7 +2767,9 @@ function jump(sec) {
   $('#btnFreeze').classList.remove('on');
   for (const d of LINES) {
     const { sb, video } = d;
-    if (!sb || !sb.buffered.length || d.bypass) continue;
+    // bypass FIRST: bypassToLive detaches the MediaSource but leaves d.sb set,
+    // so sb.buffered throws InvalidStateError on a bypassed line.
+    if (!sb || d.bypass || !sb.buffered.length) continue;
     const start = sb.buffered.start(0), end = sb.buffered.end(sb.buffered.length - 1);
     // clamp() inverts when the buffered range is shorter than the guard band,
     // so widen rather than let the low bound lose to the high one.
