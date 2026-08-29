@@ -51,8 +51,15 @@ function wait(fn, label, ms = 25000) {
     }, 'the viewer pairing code', 30000);
     say('viewer pairing code: ' + code.length + ' chars');
 
-    fc.src = '../index.html#j=' + code;
-    say('camera opening the pairing link…');
+    // Go through onScanned, not straight to #j=. The double-join defect lived in
+    // onScanned (it set location.hash AND called joinFromQr, and the hashchange
+    // called joinFromQr again), so a test that jumps past it cannot catch a
+    // regression of the exact bug it is meant to guard.
+    fc.src = '../index.html#cam';
+    await wait(() => (fc.contentWindow && fc.contentWindow.onScanned) ? true : null,
+      'the camera page to load', 20000);
+    say('camera loaded; simulating a QR scan');
+    fc.contentWindow.onScanned(location.origin + '/index.html#j=' + code);
     const answer = await wait(() => {
       const t = C().getElementById('mcOut');
       return t && t.value.length > 100 ? t.value : null;
@@ -88,6 +95,15 @@ function wait(fn, label, ms = 25000) {
     say('viewer security: ' + (V().getElementById('vfyPill') || {}).textContent);
     const cPill = C().getElementById('cVfyPill').textContent;
     say('camera security: ' + cPill);
+
+    // One scan must open exactly one camera and register exactly one signalling
+    // peer. Two of each is the signature of the double-join defect.
+    const camLog = C().getElementById('dbgPre').textContent;
+    const gum = (camLog.match(/camera got media/g) || []).length;
+    const sigs = (camLog.match(/sig opening as vd-/g) || []).length;
+    say('camera opened getUserMedia x' + gum + ', signalling peers x' + sigs);
+    if (gum > 1) throw new Error('one scan opened ' + gum + ' cameras — the double-join regressed');
+    if (sigs > 1) throw new Error('one scan registered ' + sigs + ' signalling peers — the double-join regressed');
     if (/checking/i.test(cPill)) throw new Error('camera security pill never resolved: ' + cPill);
     if (!C().getElementById('mcAnswerRow').hidden) throw new Error('camera left its answer code on screen after connecting');
     // ---- interval timer -------------------------------------------------

@@ -3,8 +3,8 @@
 // Stamped by release.sh, and matched against version.txt at runtime. The page
 // knows what it IS; version.txt says what is CURRENT; a difference means this
 // tab is running stale code.
-const BUILD = '20260829-154015';
-const FILES = { js: '920bc10ccbd0', css: '869ee0ebf48c', html: '493326c4fdce' };
+const BUILD = '20260829-155229';
+const FILES = { js: '9b37c5694559', css: '869ee0ebf48c', html: '493326c4fdce' };
 /* ------------------------------------------------------------------------
  * video-delay — phone camera -> PC screen, on a delay. Zero dependencies.
  *
@@ -881,7 +881,7 @@ function maintain(d) {
 
 const CAM = { stream: null, on: false };
 const WARP = { on: false };   // set only by Cloudflare's own trace endpoint, never inferred
-const JOIN = { fp: null, nonce: null };   // pinned by the scanned QR; never sent to the broker
+const JOIN = { fp: null, nonce: null, busy: false };   // pinned by the scanned QR; never sent to the broker
 
 /* The phone spends a whole session on a tripod, so the viewer should say when it
  * is about to die rather than the set ending because the camera did. Sent over
@@ -1425,7 +1425,7 @@ async function connectViewerSignal() {
 
 /* ============================== CAMERA UI ============================== */
 
-const C = { sig: null, pc: null, dc: null, stream: null, room: '', wake: null, retry: 0, answerTimer: 0, peerNat: null,
+const C = { sig: null, pc: null, dc: null, stream: null, room: '', wake: null, retry: 0, redial: 0, answerTimer: 0, peerNat: null,
             fallbackOffer: null, fbTimer: 0, pendingCands: [], backoff: 1000 };
 
 async function getCam(facing, height) {
@@ -1504,7 +1504,17 @@ function newCameraPC(dst, cfg) {
       $('#mcQr').replaceChildren();
       $('#cManual').open = false;
     }
-    if (s === 'failed') negotiate().catch(() => {});
+    // The viewer keeps one certificate for its whole session, so the fingerprint
+    // pinned at scan time is still valid after a drop -- which means re-offering
+    // over the broker reconnects with nothing to rescan.
+    if (s === 'failed') redial('connection failed');
+    if (s === 'disconnected') {
+      clearTimeout(C.redial);
+      C.redial = setTimeout(() => {
+        if (C.pc && C.pc.connectionState === 'connected') return;
+        redial('still disconnected after 5s');
+      }, 5000);
+    }
   });
   applyBitrate();
   return pc;
@@ -1578,6 +1588,17 @@ async function onCamMsg(ev) {
 // The broker socket is only needed to set a call up. It gets dropped a lot on
 // phones (backgrounding, screen-off, network handover), so reconnect rather
 // than reporting failure -- and never renegotiate a call that is already up.
+/* Re-establish without touching the camera or the pinned fingerprint:
+ * reconnect the broker if it dropped too, then offer again. */
+function redial(why) {
+  if (!C.stream || !C.room) return;
+  clearTimeout(C.redial);
+  dbg('camera', 'redialling:', why);
+  setCamState('reconnecting\u2026');
+  if (C.sig) negotiate().catch(e => dbg('camera', 'redial offer failed', e));
+  else connectCameraSignal(true).catch(e => dbg('camera', 'redial signal failed', e));
+}
+
 async function connectCameraSignal(renegotiate = true) {
   clearTimeout(C.retry);
   if (!C.stream) return;
@@ -1624,6 +1645,10 @@ function onCamVisible() {
 }
 
 async function startCamera(room, opts = {}) {
+  // Idempotent by construction. Previously a second call overwrote C.stream and
+  // C.sig while the first connection was still open, orphaning a live camera
+  // track and a registered signalling peer that kept trickling candidates.
+  if (C.stream || C.sig || C.pc) { dbg('camera', 'restarting - tearing down the previous attempt'); stopCamera(); }
   C.room = (room || '').toUpperCase();
   C.fallbackOffer = opts.fallbackOffer || null;
   try {
@@ -1650,6 +1675,7 @@ async function startCamera(room, opts = {}) {
 
 function stopCamera() {
   clearTimeout(C.retry);
+  clearTimeout(C.redial);
   clearInterval(reportBattery.timer);
   clearTimeout(C.fbTimer);
   C.fallbackOffer = null;
@@ -1822,6 +1848,15 @@ async function manualFinish(text) {
  * offer: take the broker route first because it completes on its own, and drop
  * to the embedded offer only if that has not connected in time. */
 async function joinFromQr(code) {
+  // Belt and braces with the fix in onScanned: a scan, a hashchange and a
+  // manual paste can all land here, and two arriving together is what produced
+  // two live cameras.
+  if (JOIN.busy) { dbg('join', 'a join is already in flight - ignoring the duplicate'); return; }
+  JOIN.busy = true;
+  try { await joinFromQrInner(code); } finally { JOIN.busy = false; }
+}
+
+async function joinFromQrInner(code) {
   show('camera');
   stopScan();
   camStage('card');
@@ -2000,8 +2035,14 @@ function camStage(mode) {           // 'scan' | 'card'
 function onScanned(text) {
   const s = (text || '').trim();
   dbg('scan', 'got', s.length + ' chars');
+  // Do NOT also write location.hash here. Doing so fires hashchange, which
+  // routes straight back into joinFromQr, and the whole join ran twice: two
+  // getUserMedia calls, two signalling peers, two offers. The viewer then paired
+  // with the offer belonging to the connection this phone had already closed, so
+  // the ICE credentials never matched and no media ever flowed. The hash is not
+  // worth keeping anyway -- it would hold a stale offer across a reload.
   const j = s.indexOf('#j=');
-  if (j >= 0) { location.hash = s.slice(j); joinFromQr(s.slice(j + 3)); return; }
+  if (j >= 0) { joinFromQr(s.slice(j + 3)); return; }
   const p = s.indexOf('#p=');
   if (p >= 0) { manualAnswer(s.slice(p + 3)); return; }
   if (/^[DZJ][A-Za-z0-9_-]{20,}$/.test(s)) { joinFromQr(s); return; }
