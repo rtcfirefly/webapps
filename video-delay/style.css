@@ -215,3 +215,10 @@ details.sub[open] summary { margin-bottom: 8px; }
 #viewer.connected { height: 100dvh; min-height: 0; }
 #viewer.connected #toolbar { flex: 0 0 auto; }
 #viewer.connected #verify { flex: 0 0 auto; max-height: 34dvh; overflow: auto; }
+
+/* Update notice: present but not in the way, and reachable from any view. */
+.update { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 200;
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: #10233a; border: 1px solid var(--accent); border-radius: 999px;
+  box-shadow: 0 6px 24px #000a; font-size: 13px; }
+.update .link { color: var(--dim); }

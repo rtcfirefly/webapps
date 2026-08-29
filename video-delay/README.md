@@ -160,6 +160,27 @@ pulled the *old* scripts out of the phone's cache.
 There is no service worker and no application cache to configure; the URL is the
 only lever, which is why the TTL lives here rather than in a header.
 
+## Updating a running pair
+
+Both pages poll `version.json` (every 10 s by default) and compare **per-file
+hashes**, not one version number — because that is what separates the two cases:
+
+- **Styling changed only** → the stylesheet is swapped live. No reload, no
+  renegotiation, the video does not blink. Most UI adjustment is this.
+- **JS or markup changed** → a reload is genuinely unavoidable, since nothing in
+  a browser can carry a live `RTCPeerConnection` across a navigation. So the two
+  devices reload *together*: whichever notices first tells the other over the
+  data channel, both land on the same build, and re-pairing is automatic.
+
+*Advanced → Updates* turns the automatic behaviour off (you get a banner
+instead) and sets the poll interval.
+
+Release with `./release.sh`, which stamps the build id and the per-file hashes
+into `app.js`, writes `version.json`, and copies everything to the deploy tree.
+`app.js` is hashed with its own stamp lines removed, so stamping does not change
+the hash the stamp records — without that, every release would look like a code
+change and force a reload.
+
 ## Deploying
 
 It's plain static files in `video-delay/` of the `webapps` repo, served by

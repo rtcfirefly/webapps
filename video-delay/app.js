@@ -1,4 +1,10 @@
 'use strict';
+
+// Stamped by release.sh, and matched against version.txt at runtime. The page
+// knows what it IS; version.txt says what is CURRENT; a difference means this
+// tab is running stale code.
+const BUILD = '20260829-145614';
+const FILES = { js: '3170b727b43f', css: 'a53d1de029c6', html: '202d7e845b8c' };
 /* ------------------------------------------------------------------------
  * video-delay — phone camera -> PC screen, on a delay. Zero dependencies.
  *
@@ -28,6 +34,85 @@ function toast(msg, ms = 3400) {
   t.textContent = msg; t.hidden = false;
   clearTimeout(toast._t);
   toast._t = setTimeout(() => { t.hidden = true; }, ms);
+}
+
+/* ------------------------------------------------------- self-updating  */
+/* A reload always destroys the RTCPeerConnection -- nothing in a browser can
+ * carry a live DTLS session across a navigation. So the goal is to reload as
+ * rarely as possible, and to make the reloads that remain cheap.
+ *
+ * version.json carries a hash per file, not one version number, because that is
+ * what distinguishes the two cases: a stylesheet can be swapped live with the
+ * connection untouched, while changed JS or markup genuinely needs the page
+ * back. Most UI adjustment is the first kind. */
+
+const UPD = { timer: 0, offered: null, files: Object.assign({}, FILES) };
+
+async function checkVersion() {
+  let v;
+  try {
+    const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    v = await r.json();
+  } catch { return; }                    // offline, or Pages mid-deploy
+  if (!v || !v.build) return;
+
+  const cssChanged = v.css && v.css !== UPD.files.css;
+  const codeChanged = (v.js && v.js !== UPD.files.js) || (v.html && v.html !== UPD.files.html);
+
+  if (codeChanged) { onUpdateAvailable(v); return; }   // a reload is unavoidable
+  if (cssChanged) { hotSwapCss(v); return; }           // it is not
+}
+
+/* Styling changes apply with nothing torn down: no reload, no renegotiation,
+ * the video does not even blink. The new sheet is loaded before the old link is
+ * dropped, so there is no unstyled flash. */
+function hotSwapCss(v) {
+  const old = document.querySelector('link[rel="stylesheet"]');
+  const el = document.createElement('link');
+  el.rel = 'stylesheet';
+  el.href = 'style.css?v=' + encodeURIComponent(v.build);
+  el.onload = () => {
+    if (old && old !== el) old.remove();
+    UPD.files.css = v.css;
+    dbg('update', 'stylesheet hot-swapped to', v.build, '- no reload, connection untouched');
+    toast('Styles updated');
+  };
+  el.onerror = () => { el.remove(); dbg('update', 'stylesheet swap failed, leaving the old one'); };
+  document.head.appendChild(el);
+}
+
+function onUpdateAvailable(v) {
+  if (UPD.offered === v.build) return;
+  UPD.offered = v.build;
+  dbg('update', 'code changed (js/html) — this build is', BUILD, 'latest is', v.build);
+  if (store.get('autoUpdate', true) !== false) { applyUpdate(v.build, true); return; }
+  $('#updMsg').textContent = 'New version available';
+  $('#upd').hidden = false;
+}
+
+/* Tell the peer over the channel that is already open, then go. Both ends land
+ * on the same build and re-pair without anyone scanning anything. */
+function applyUpdate(build, tellPeer) {
+  const dc = V.dc || C.dc;
+  let told = false;
+  if (tellPeer && dc && dc.readyState === 'open') {
+    try { dc.send(JSON.stringify({ t: 'update', v: build })); told = true; dbg('update', 'told the peer to move to', build); }
+    catch (e) { dbg('update', 'could not tell the peer', e); }
+  }
+  const isViewer = !$('#viewer').hidden;
+  const dest = location.origin + location.pathname + '?v=' + encodeURIComponent(build) +
+    (isViewer ? '#v' : '#cam');
+  dbg('update', 'reloading into', build);
+  setTimeout(() => location.replace(dest), told ? 250 : 0);   // let the channel flush
+}
+
+function startVersionPolling() {
+  clearInterval(UPD.timer);
+  const secs = Math.max(5, Number(store.get('pollSecs', 10)) || 10);
+  UPD.timer = setInterval(checkVersion, secs * 1000);
+  checkVersion();
+  dbg('update', 'build', BUILD, '| polling version.json every', secs + 's');
 }
 
 /* --------------------------------------------------------------- debug  */
@@ -1155,6 +1240,7 @@ function newViewerPC(remoteId, cfg) {
   V.dc = authChannel(pc, 'viewer');
   if (V.dc) V.dc.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.t === 'update') { dbg('update', 'peer moved to', m.v); applyUpdate(m.v, false); return; }
     if (m.t === 'batt') {
       const was = V.batt && V.batt.pct;
       V.batt = { pct: m.pct, charging: !!m.charging, at: now() };
@@ -1382,6 +1468,10 @@ function newCameraPC(dst, cfg) {
   logPC(pc, 'camera');
   C.pendingCands = [];
   C.dc = authChannel(pc, 'camera');
+  if (C.dc) C.dc.onmessage = (ev) => {
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.t === 'update') { dbg('update', 'peer moved to', m.v); applyUpdate(m.v, false); }
+  };
   if (C.dc) C.dc.onopen = () => {
     reportBattery();
     if (!JOIN.nonce) { dbg('camera', 'no scan token to present (code was typed, not scanned)'); return; }
@@ -2053,7 +2143,10 @@ function wire() {
   addEventListener('error', e => dbg('!! window error:', e.message, (e.filename || '').split('/').pop() + ':' + e.lineno));
   addEventListener('unhandledrejection', e => dbg('!! unhandled rejection:', fmtArg(e.reason)));
   dbg('boot', navigator.userAgent);
-  dbg('boot', 'secure=' + window.isSecureContext, 'broker=' + SIGNAL_URL, 'MSImpl=' + (MSImpl ? MSImpl.name : 'none'));
+  dbg('boot', 'secure=' + window.isSecureContext, 'broker=' + SIGNAL_URL, 'MSImpl=' + (MSImpl ? MSImpl.name : 'none'), 'build=' + BUILD);
+  startVersionPolling();
+  $('#updNow').onclick = () => applyUpdate(UPD.offered || UPD.seen, true);
+  $('#updLater').onclick = () => { $('#upd').hidden = true; };
   // The public broker runs a multi-region build whose peer registry is a bare
   // per-process Map with no cross-node routing, so two peers can both be OPEN
   // on different nodes and never see each other. If the two devices report
@@ -2199,6 +2292,8 @@ function wire() {
   $('#iceCfg').value = store.get('ice', '');
   $('#sigUrl').value = store.get('signal', '') || SIGNAL_URL;
   $('#cacheTtl').value = Number(store.get('cacheTtlMin', 0)) || 0;
+  $('#autoUpdate').checked = store.get('autoUpdate', true) !== false;
+  $('#pollSecs').value = Number(store.get('pollSecs', 10)) || 10;
   $('#turnUrl').value = store.get('turnUrl', '');
   $('#turnUser').value = store.get('turnUser', '');
   $('#turnPass').value = store.get('turnPass', '');
@@ -2213,6 +2308,8 @@ function wire() {
     store.set('turnUser', $('#turnUser').value.trim());
     store.set('turnPass', $('#turnPass').value.trim());
     store.set('forceRelay', $('#forceRelay').checked);
+    store.set('autoUpdate', $('#autoUpdate').checked);
+    store.set('pollSecs', Math.max(5, Number($('#pollSecs').value) || 10));
     location.reload();
   };
   $('#advReset').onclick = () => {

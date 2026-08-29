@@ -102,6 +102,14 @@
         <input type="text" id="sigUrl" spellcheck="false">
       </div>
       <div class="row">
+        <label><b>Updates</b> — styling changes apply live with the connection
+          untouched. Changed code needs a reload, which both devices do together
+          so you never re-pair by hand.</label>
+        <label class="chk"><input type="checkbox" id="autoUpdate" checked> update automatically</label>
+        <label>check every (seconds)</label>
+        <input type="number" id="pollSecs" min="5" max="3600" step="1" value="10">
+      </div>
+      <div class="row">
         <label>Cache-bust TTL for pairing links, minutes — <b>0 means a fresh token
           every time</b>, which is what you want while iterating. Raise it once the
           code settles so a returning phone reuses its cache.</label>
@@ -285,6 +293,12 @@
     <label class="chk"><input type="checkbox" id="dbgSdp"> include full SDP <span class="warn">(contains IP addresses)</span></label>
   </div>
 </details>
+
+<div class="update" id="upd" hidden>
+  <span id="updMsg">New version available</span>
+  <button id="updNow" class="sm">Update both</button>
+  <button id="updLater" class="link">later</button>
+</div>
 
 <div id="toast" hidden></div>
 </body>
