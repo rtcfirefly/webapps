@@ -287,6 +287,11 @@ someone is in the middle — stop.** The scan button disables itself where
   candidate pair and fails. Same Wi-Fi works because the host candidates reach
   each other on the LAN without leaving it.
 
+  **Cloudflare WARP on either device is enough to cause this**, even when the
+  other end is on a perfectly ordinary connection: WARP puts the device behind
+  Cloudflare's carrier NAT, so its reflexive candidate is unreachable from
+  outside. Same Wi-Fi still works because WARP does not tunnel LAN traffic.
+
   The debug log names this explicitly on failure: it prints the candidate types
   gathered, and if there is no `relay` on either side it says so. Fix it by
   putting a TURN server in *Advanced → TURN*, then tick **force relay-only** to

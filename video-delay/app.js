@@ -1591,6 +1591,16 @@ function brokerFallback(why) {
   clearTimeout(C.fbTimer);
   if (!C.fallbackOffer) { dbg('join', 'no fallback offer available:', why); return; }
   if (C.pc && C.pc.connectionState === 'connected') return;
+  // The fallback replaces the BROKER, not the network path between the two
+  // devices. Once an answer has arrived, signalling has demonstrably worked;
+  // answering the QR's offer instead would gather the same candidates and fail
+  // the same way, while burning a second doomed connection and making the log
+  // look like two different problems. Let ICE finish and report honestly.
+  if (C.pc && C.pc.remoteDescription) {
+    dbg('join', 'NOT falling back (' + why + '): signalling already succeeded,',
+      'so this is a connectivity problem and the QR offer cannot help it');
+    return;
+  }
   dbg('join', 'falling back to the scanned offer:', why);
   clearTimeout(C.retry);
   if (C.sig) { C.sig.close(); C.sig = null; }
