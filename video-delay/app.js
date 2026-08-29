@@ -62,9 +62,27 @@ function dbg(...args) {
 function redactAddr(a) {
   if (!a) return '?';
   if (/\.local$/i.test(a)) return 'mdns.local';
-  if (a.includes(':')) return 'ipv6';
+  if (a.includes(':')) {
+    // Scope, not address. "ipv6" alone was useless: a link-local candidate can
+    // never cross networks and a global one might have, and the logs could not
+    // tell them apart -- which is exactly the question when a connection fails
+    // and both ends appear to have IPv6.
+    const h = a.toLowerCase().replace(/^\[/, '');
+    if (h === '::1') return 'ipv6-loopback';
+    if (/^fe[89ab]/.test(h)) return 'ipv6-link-local';   // fe80::/10 — same-link only
+    if (/^f[cd]/.test(h)) return 'ipv6-ula';             // fc00::/7  — private
+    if (/^[23]/.test(h)) return 'ipv6-global';           // 2000::/3  — routable
+    return 'ipv6-other';
+  }
   const p = a.split('.');
-  return p.length === 4 ? p[0] + '.x.x.x' : 'addr';
+  if (p.length !== 4) return 'addr';
+  const n = +p[0], m = +p[1];
+  // Naming the shared-address ranges costs no privacy and answers "is this
+  // behind carrier NAT or a VPN" without a second round trip.
+  const kind = n === 10 || (n === 192 && m === 168) || (n === 172 && m >= 16 && m <= 31) ? ' private'
+    : n === 100 && m >= 64 && m <= 127 ? ' CGNAT'
+    : n === 169 && m === 254 ? ' link-local' : '';
+  return p[0] + '.x.x.x' + kind;
 }
 
 function candInfo(c) {
