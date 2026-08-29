@@ -171,6 +171,36 @@ function natVerdict(pc) {
   return { nat, iface, warp: WARP.on || iface.includes('warp'), overlay: iface.includes('overlay') };
 }
 
+/* User-facing copy. Deliberately free of "TURN", "NAT" and "ICE": the person
+ * reading it needs to know which device to change and what to do, and the word
+ * for the fix belongs in Advanced where it is a setting, not in the sentence
+ * that tells them their camera will not connect. */
+function reachText(mine, theirs, iAmViewer) {
+  const bad = v => v && (v.warp || v.nat === 'symmetric' || v.nat === 'blocked');
+  const me = iAmViewer ? 'This computer' : 'This phone';
+  const them = iAmViewer ? 'Your phone' : 'The computer';
+  const warpish = v => v && v.warp;
+  const blame = (label, v) =>
+    warpish(v) ? '<b>' + label + ' is on a VPN (Cloudflare WARP)</b>, which stops the two devices reaching each other.'
+    : v && v.nat === 'blocked' ? '<b>' + label + ' cannot get out to the internet properly</b> — something is blocking it.'
+    : '<b>' + label + '\u2019s network will not allow a direct connection</b> — usually a VPN or a mobile network.';
+
+  const fix = ' Put both devices on the same Wi-Fi, or turn the VPN off.';
+  if (bad(mine) && bad(theirs)) return '<b>Neither device can be reached directly.</b>' + fix;
+  if (bad(theirs)) return blame(them, theirs) + fix;
+  if (bad(mine)) return blame(me, mine) + fix;
+  return '<b>The two devices could not reach each other.</b>' + fix;
+}
+
+function showAlert(which, html) {
+  const box = $('#' + which + 'Alert'), msg = $('#' + which + 'AlertMsg');
+  if (!box) return;
+  msg.innerHTML = html;
+  box.hidden = false;
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function clearAlert(which) { const b = $('#' + which + 'Alert'); if (b) b.hidden = true; }
+
 function natEnglish(v, who) {
   if (!v) return who + ': unknown';
   if (v.warp) return who + ' is on Cloudflare WARP — its address is Cloudflare\u2019s, and nothing can reach it directly';
@@ -188,13 +218,12 @@ function warnUnreachable() {
   if (!them || turnServer()) return;
   const bad = them.warp || them.nat === 'symmetric' || them.nat === 'blocked';
   if (!bad) return;
-  const why = them.warp ? 'The phone is on Cloudflare WARP'
-    : them.nat === 'blocked' ? 'The phone cannot reach any STUN server'
-    : 'The phone is behind a symmetric NAT (VPN or carrier NAT)';
-  dbg('viewer', 'early warning:', why, '- and no TURN is configured');
-  setSig('phone unreachable directly', 'bad');
-  $('#vfyNote').textContent = why + ', so a direct connection will only work on the same Wi-Fi. Turn the VPN off on the phone, or add a TURN server in Advanced.';
-  toast(why + ' — same Wi-Fi, VPN off, or add TURN');
+  const why = them.warp ? 'the phone is on Cloudflare WARP'
+    : them.nat === 'blocked' ? 'the phone cannot reach any STUN server'
+    : 'the phone is behind a symmetric NAT';
+  dbg('viewer', 'early warning:', why, '- and no relay is configured');
+  setSig('phone may be unreachable', 'bad');
+  showAlert('v', reachText(null, them, true));
 }
 
 function diagnoseIceFailure(pc, tag) {
@@ -227,11 +256,12 @@ function diagnoseIceFailure(pc, tag) {
     : 'Add a TURN server in Advanced, or put both devices on the same network.';
   dbg(tag, 'NO relay candidate on either side.', who + '.', fix);
   if (tag === 'viewer') {
-    setSig('no route — ' + (bad(theirs) && !bad(mine) ? 'the phone is behind a VPN/NAT' : 'needs TURN'), 'bad');
-    $('#vfyNote').textContent = who + '. ' + fix;
-    toast(who + '. ' + fix);
+    V.blocked = true;     // regenerating the QR cannot fix a network path
+    setSig('could not connect', 'bad');
+    showAlert('v', reachText(mine, theirs, true));
   } else {
-    setCamState('no route — ' + who, 'bad');
+    setCamState('could not connect', 'bad');
+    showAlert('c', reachText(mine, theirs, false));
   }
 }
 
@@ -859,7 +889,7 @@ function pipDrag(el) {
   });
 }
 
-async function toggleWebcam(want) {
+async function toggleWebcam(want, remember = true) {
   const on = want === undefined ? !CAM.on : want;
   if (!on) {
     stopDelay(W);
@@ -868,7 +898,7 @@ async function toggleWebcam(want) {
     $('#selfLive').srcObject = null;
     $('#pipLive').hidden = true; $('#pipDelay').hidden = true;
     $('#btnSelf').classList.remove('on');
-    store.set('webcam', false);
+    if (remember) store.set('webcam', false);
     dbg('webcam', 'off');
     return;
   }
@@ -890,14 +920,14 @@ async function toggleWebcam(want) {
   $('#selfLive').srcObject = CAM.stream;
   $('#selfLive').play().catch(() => {});
   startDelay(W, CAM.stream, $('#selfDelay'));
-  store.set('webcam', true);
+  if (remember) store.set('webcam', true);
   dbg('webcam', 'on, tracks:', CAM.stream.getVideoTracks().map(t => JSON.stringify(t.getSettings())).join(' '));
 }
 
 /* ============================== VIEWER UI ============================== */
 
 const V = { sig: null, pc: null, dc: null, room: '', peer: null, manual: false, reoffer: 0,
-            nonce: '', nonces: new Set(), batt: null, battWarned: false, peerNat: null,
+            nonce: '', nonces: new Set(), batt: null, battWarned: false, peerNat: null, blocked: false,
             pendingCands: [], stats: null, statsTimer: 0 };
 
 function show(id) {
@@ -905,6 +935,12 @@ function show(id) {
 }
 
 function setConnected(on) {
+  if (on) clearAlert('v');
+  // The self-view used to start on page load and record into a hidden stage --
+  // camera light on, CPU and memory spent, nothing to show. It belongs to the
+  // connected state. The stored preference is preserved either way.
+  if (on && store.get('webcam', false) && !CAM.on) toggleWebcam(true, false);
+  if (!on && CAM.on) toggleWebcam(false, false);
   $('#viewer').classList.toggle('connected', !!on);
   $('#heroTitle').textContent = on ? 'Connected' : 'Scan this with your phone';
 }
@@ -1156,8 +1192,13 @@ function newViewerPC(remoteId, cfg) {
       refreshSas(pc, $('#vfyCode'), $('#vfyQr'));
     }
     if (['failed', 'closed'].includes(pc.connectionState)) { VFY.full = ''; setVfy('none', ''); }
-    if (pc.connectionState === 'failed') { setSig('connection failed', 'bad'); toast('Connection failed — try again, or enable TURN'); }
-    if (V.manual && ['failed', 'disconnected', 'closed'].includes(pc.connectionState) &&
+    // No toast: diagnoseIceFailure raises a banner that names the cause and stays.
+    if (pc.connectionState === 'failed') setSig('connection failed', 'bad');
+    if (V.blocked) {
+      // A new QR invalidates the one the phone just scanned and invites another
+      // scan that will fail identically. Leave the banner and its Try again.
+      dbg('viewer', 'not reissuing the QR: the failure was the network path, not the pairing');
+    } else if (V.manual && ['failed', 'disconnected', 'closed'].includes(pc.connectionState) &&
         !$('#mvStart').disabled) {
       dbg('viewer', 'manual pairing dropped - putting a fresh QR up');
       $('#vManual').open = true;
@@ -1213,7 +1254,6 @@ async function startViewer() {
   // session across that. What a reload CAN do is come back ready to re-pair,
   // so if the last pairing was manual, put the QR on screen immediately --
   // recovery is then one scan rather than a hunt through the panels.
-  if (store.get('webcam', false)) toggleWebcam(true);
   await connectViewerSignal();
   // The QR is the way in, not a fallback: it carries the room code AND a
   // standalone offer, so one scan works whether or not the broker is healthy.
@@ -1225,6 +1265,7 @@ async function startViewer() {
   clearTimeout(startViewer.hint);
   startViewer.hint = setTimeout(() => {
     if (V.pc && V.pc.connectionState === 'connected') return;
+    if (V.blocked) return;   // we already know why, and it is not a signalling problem
     $('#vManual').open = true;
     dbg('viewer', 'nothing connected after 20s - surfacing the answer-code panel');
   }, 20000);
@@ -1356,6 +1397,7 @@ function newCameraPC(dst, cfg) {
     setCamState(s, s === 'connected' ? 'ok' : (s === 'failed' ? 'bad' : ''));
     if (s === 'connected') {
       clearTimeout(C.fbTimer);
+      clearAlert('c');
       C.fallbackOffer = null;
       refreshSas(pc, $('#cVfyCode'), $('#cVfyQr'));
     }
@@ -1693,7 +1735,7 @@ async function joinFromQr(code) {
   C.peerNat = o.nat || null;
   if (C.peerNat) dbg('join', 'the PC reports', JSON.stringify(C.peerNat));
   if (C.peerNat && (C.peerNat.warp || C.peerNat.nat === 'symmetric')) {
-    setCamState('the PC is behind a VPN/NAT — this may not connect', 'bad');
+    showAlert('c', reachText(null, C.peerNat, false));
   }
   dbg('join', 'scanned pairing QR: room', o.r, 'offer', (o.s || '').length + 'B,',
     JOIN.fp ? 'pinned fingerprint ' + JOIN.fp.slice(-17) : 'NO fingerprint in the offer');
@@ -2124,6 +2166,17 @@ function wire() {
   };
 
   $('#btnSelf').onclick = () => toggleWebcam();
+  $('#vAlertRetry').onclick = async () => {
+    clearAlert('v'); V.blocked = false; V.peerNat = null;
+    setSig('starting again…');
+    await connectViewerSignal();
+    manualOffer();
+  };
+  $('#vAlertMore').onclick = () => {
+    $('#advanced').open = true;
+    $('#advanced').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+  $('#cAlertRetry').onclick = () => { clearAlert('c'); stopCamera(); startPhoneScanner(); };
   applyPip();
   pipDrag($('#pipLive'));
   pipDrag($('#pipDelay'));

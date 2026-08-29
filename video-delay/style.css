@@ -194,3 +194,12 @@ details.sub[open] summary { margin-bottom: 8px; }
 .reticle { position: absolute; inset: 14%; border: 3px solid var(--accent); border-radius: 12px;
   box-shadow: 0 0 0 100vmax #0007; pointer-events: none; }
 .hud span.low { color: var(--bad); border-color: #5c2f2f; }
+
+/* A connection failure is not a toast. It stays until it is acted on. */
+.alert { width: 100%; text-align: left; background: #2a1416; border: 1px solid #7a2b32;
+  border-left: 5px solid var(--bad); border-radius: var(--r); padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 10px; }
+.alert-msg { font-size: 15px; line-height: 1.5; color: #ffd9db; }
+.alert-msg b { color: #fff; }
+.alert .grp { gap: 10px; }
+#camera .alert { margin-bottom: 4px; }

@@ -49,6 +49,13 @@
 
   <!-- everything here is replaced by the video once a phone connects -->
   <div class="hero" id="pairHero">
+    <div class="alert" id="vAlert" hidden>
+      <div class="alert-msg" id="vAlertMsg"></div>
+      <div class="grp">
+        <button id="vAlertRetry">Try again</button>
+        <button id="vAlertMore" class="link">other options</button>
+      </div>
+    </div>
     <h2 id="heroTitle">Scan this with your phone</h2>
     <div id="mvQr" class="qrbox"></div>
     <p class="pairtxt" id="mvQrNote"></p>
@@ -84,7 +91,7 @@
       </details>
     </details>
 
-    <details class="adv">
+    <details class="adv" id="advanced">
       <summary>Advanced</summary>
       <div class="row">
         <label>ICE servers (JSON <code>RTCConfiguration</code>) — blank for defaults</label>
@@ -193,6 +200,10 @@
 
   <!-- the phone lands here: point it at the PC -->
   <div class="hero" id="scanHero">
+    <div class="alert" id="cAlert" hidden>
+      <div class="alert-msg" id="cAlertMsg"></div>
+      <div class="grp"><button id="cAlertRetry">Try again</button></div>
+    </div>
     <h2>Point at the code on your PC</h2>
     <div class="scanwrap">
       <video id="scanCam" playsinline muted></video>
