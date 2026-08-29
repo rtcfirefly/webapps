@@ -181,6 +181,31 @@ into `app.js`, writes `version.json`, and copies everything to the deploy tree.
 the hash the stamp records — without that, every release would look like a code
 change and force a reload.
 
+## Running it here
+
+`./tools/shots/run.sh` screenshots the UI and smoke-tests the app in a
+container — offline, hardened, no browser on the host. It builds its own image
+from `archlinux/archlinux:base`, or reuses `localhost/habit-tracker-shots` if
+that exists, since the toolchain is identical.
+
+It checks three things, and the third is the one that matters:
+
+- **screenshots** at desktop and phone widths, into `tools/shots/out/`
+- **JS errors on boot** — a page that throws still screenshots as a plausible
+  layout, so errors are collected into the DOM and read back
+- **a real end-to-end pairing** between two same-origin iframes, one viewer and
+  one camera, over loopback. Chromium's fake camera stands in for a device. It
+  asserts that the pairing completes, that the delay buffer actually produces
+  decoded output, and that both ends report themselves verified.
+
+Two flags make that possible and are worth knowing: `--use-fake-device-for-media-stream`
+(the app is nothing but `getUserMedia`) and `--allow-loopback-in-peer-connection`
+(with `--network none` the only interface is `lo`, and WebRTC excludes loopback
+candidates by default, so ICE would gather nothing regardless of the app).
+
+What it cannot cover: real networks. Cross-network NAT, VPNs and TURN need two
+real devices, which is why the in-app debug log exists.
+
 ## Deploying
 
 It's plain static files in `video-delay/` of the `webapps` repo, served by

@@ -3,8 +3,8 @@
 // Stamped by release.sh, and matched against version.txt at runtime. The page
 // knows what it IS; version.txt says what is CURRENT; a difference means this
 // tab is running stale code.
-const BUILD = '20260829-145614';
-const FILES = { js: '3170b727b43f', css: 'a53d1de029c6', html: '202d7e845b8c' };
+const BUILD = '20260829-151854';
+const FILES = { js: '87b6bdf3f30a', css: 'a53d1de029c6', html: '202d7e845b8c' };
 /* ------------------------------------------------------------------------
  * video-delay — phone camera -> PC screen, on a delay. Zero dependencies.
  *
@@ -1490,6 +1490,19 @@ function newCameraPC(dst, cfg) {
       clearAlert('c');
       C.fallbackOffer = null;
       refreshSas(pc, $('#cVfyCode'), $('#cVfyQr'));
+      // The pill only ever updated on the broker route's fingerprint check, so
+      // pairing by QR left it reading "checking…" forever. Answering an offer
+      // that was scanned off the screen IS the check -- the certificate came
+      // from the camera, not the network -- so say so.
+      const p = $('#cVfyPill');
+      p.textContent = JOIN.fp ? 'verified by QR' : 'not verified';
+      p.className = 'pill' + (JOIN.fp ? ' ok' : '');
+      // The answer code has been consumed. Leaving it on screen is stale, and
+      // it is pairing material that should not sit around being photographed.
+      $('#mcAnswerRow').hidden = true;
+      $('#mcOut').value = '';
+      $('#mcQr').replaceChildren();
+      $('#cManual').open = false;
     }
     if (s === 'failed') negotiate().catch(() => {});
   });

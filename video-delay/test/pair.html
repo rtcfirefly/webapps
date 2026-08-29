@@ -1,0 +1,101 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>video-delay — pairing test</title>
+<!--
+  Drives a real pairing between two same-origin iframes: one viewer, one camera.
+  The QR path is used deliberately, because it is the only route that works with
+  --network none -- the broker is unreachable, the camera's fallback fires, and
+  the offer embedded in the pairing code finishes the job over loopback.
+
+  This is the only way to exercise pairing, the delay pipeline and the connected
+  layout without two real devices.
+-->
+<style>
+  body { margin: 0; font: 13px/1.5 system-ui, sans-serif; background: #0b0d10; color: #e7edf3; }
+  #log { padding: 10px 14px; white-space: pre-wrap; font-family: ui-monospace, monospace; border-bottom: 1px solid #2a323c; }
+  #frames { display: flex; gap: 8px; padding: 8px; height: calc(100dvh - 140px); }
+  iframe { flex: 1 1 0; height: 100%; border: 1px solid #2a323c; border-radius: 8px; background: #000; }
+  body[data-result="pass"] #log { color: #5ad46a; }
+  body[data-result="fail"] #log { color: #ff6b6b; }
+</style>
+<div id="log">starting…</div>
+<div id="frames">
+  <iframe id="fv" src="../index.html#v" allow="camera; microphone"></iframe>
+  <iframe id="fc" allow="camera; microphone"></iframe>
+</div>
+<script>
+const lines = [];
+const say = (s) => { lines.push(s); document.getElementById('log').textContent = lines.join('\n'); };
+
+function wait(fn, label, ms = 25000) {
+  return new Promise((res, rej) => {
+    const t0 = Date.now();
+    (function tick() {
+      let v = null;
+      try { v = fn(); } catch { /* iframe still loading */ }
+      if (v) return res(v);
+      if (Date.now() - t0 > ms) return rej(new Error('timed out waiting for ' + label));
+      setTimeout(tick, 200);
+    })();
+  });
+}
+
+(async () => {
+  const fv = document.getElementById('fv'), fc = document.getElementById('fc');
+  const V = () => fv.contentDocument, C = () => fc.contentDocument;
+  try {
+    say('waiting for the viewer to build a pairing code…');
+    const code = await wait(() => {
+      const t = V().getElementById('mvOffer');
+      return t && t.value.length > 100 ? t.value : null;
+    }, 'the viewer pairing code', 30000);
+    say('viewer pairing code: ' + code.length + ' chars');
+
+    fc.src = '../index.html#j=' + code;
+    say('camera opening the pairing link…');
+    const answer = await wait(() => {
+      const t = C().getElementById('mcOut');
+      return t && t.value.length > 100 ? t.value : null;
+    }, 'the camera answer (broker fallback)', 45000);
+    say('camera answer: ' + answer.length + ' chars');
+
+    V().getElementById('mvIn').value = answer;
+    V().getElementById('mvGo').click();
+    say('answer handed back to the viewer');
+
+    await wait(() => V().getElementById('viewer').classList.contains('connected'),
+      'the connection', 30000);
+    say('CONNECTED');
+
+    // The connection is not the feature. Drop the delay to something short and
+    // prove the buffer actually produces delayed output, which is the only part
+    // that cannot be inferred from a screenshot.
+    fv.contentWindow.setDelay(2);
+    say('delay set to 2s; waiting for the buffer to fill…');
+    const buffered = await wait(() => {
+      const v = V().getElementById('v');
+      return v && v.buffered && v.buffered.length && v.buffered.end(v.buffered.length - 1) > 0.5
+        ? v.buffered.end(v.buffered.length - 1) : null;
+    }, 'the delay buffer to produce output', 30000);
+    say('delayed video buffered: ' + buffered.toFixed(1) + 's');
+
+    const v = V().getElementById('v');
+    say('delayed video playing: t=' + v.currentTime.toFixed(1) + ' readyState=' + v.readyState);
+    if (v.readyState < 2) throw new Error('delayed video never decoded (readyState ' + v.readyState + ')');
+
+    say('viewer hud: ' + (V().getElementById('hud').textContent || '(empty)'));
+    say('camera state: ' + (C().getElementById('camState') || {}).textContent);
+    say('viewer security: ' + (V().getElementById('vfyPill') || {}).textContent);
+    const cPill = C().getElementById('cVfyPill').textContent;
+    say('camera security: ' + cPill);
+    if (/checking/i.test(cPill)) throw new Error('camera security pill never resolved: ' + cPill);
+    if (!C().getElementById('mcAnswerRow').hidden) throw new Error('camera left its answer code on screen after connecting');
+    document.body.dataset.result = 'pass';
+  } catch (e) {
+    say('FAILED: ' + e.message);
+    try { say('viewer status: ' + V().getElementById('sigState').textContent); } catch {}
+    try { say('camera status: ' + C().getElementById('camState').textContent); } catch {}
+    document.body.dataset.result = 'fail';
+  }
+})();
+</script>
