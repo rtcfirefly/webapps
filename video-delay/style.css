@@ -222,3 +222,35 @@ details.sub[open] summary { margin-bottom: 8px; }
   background: #10233a; border: 1px solid var(--accent); border-radius: 999px;
   box-shadow: 0 6px 24px #000a; font-size: 13px; }
 .update .link { color: var(--dim); }
+
+/* ---- interval timer -------------------------------------------------- */
+/* Inside #stage so it survives fullscreen, which is where a workout actually
+   watches it from. Top-centre; the delayed pane's tag moves to the right to
+   keep out of its way. */
+#paneDelay .tag { left: auto; right: 8px; }
+
+.timerbar { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5;
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: #000b; border: 1px solid #ffffff24; border-radius: 999px;
+  backdrop-filter: blur(6px); transition: background .3s, border-color .3s; }
+.timerbar[data-phase="prep"] { background: #78350fdd; border-color: #b45309; }
+.timerbar[data-phase="work"] { background: #14532ddd; border-color: #22c55e; }
+.timerbar[data-phase="rest"] { background: #1e3a8add; border-color: #60a5fa; }
+.timerbar[data-phase="done"] { background: #4c1d95dd; border-color: #a78bfa; }
+.tphase { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #dbe6f0; }
+.ttime { font: 700 30px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums; min-width: 84px; text-align: center; }
+.tround { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.timerbar button { padding: 8px 12px; font-size: 13px; background: #ffffff14; border-color: #ffffff24; }
+.timerbar button:disabled { opacity: .4; }
+/* Fullscreen hides it with the cursor, like the delay bar, but never mid-round. */
+.stage:fullscreen.idle .timerbar[data-phase="idle"] { opacity: 0; pointer-events: none; transition: opacity .25s; }
+
+.timercfg { position: absolute; top: 66px; left: 50%; transform: translateX(-50%); z-index: 6;
+  width: min(420px, 92%); padding: 14px; background: #0e1216f2; border: 1px solid var(--line);
+  border-radius: var(--r); box-shadow: 0 10px 40px #000b; }
+.tgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.tgrid label { display: flex; flex-direction: column; gap: 4px; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+.tgrid input { width: 100%; text-align: right; }
+.timercfg .chk { margin-bottom: 8px; font-size: 13px; }

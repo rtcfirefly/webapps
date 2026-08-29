@@ -90,6 +90,35 @@ function wait(fn, label, ms = 25000) {
     say('camera security: ' + cPill);
     if (/checking/i.test(cPill)) throw new Error('camera security pill never resolved: ' + cPill);
     if (!C().getElementById('mcAnswerRow').hidden) throw new Error('camera left its answer code on screen after connecting');
+    // ---- interval timer -------------------------------------------------
+    // `const` at module scope is not on window, so the pipeline state is not
+    // reachable from here. The Live button carries the same fact: it is marked
+    // `on` exactly when the view has been scrubbed off the live edge.
+    const q = V().getElementById.bind(V());
+    const replaying = () => q('btnLive').classList.contains('on');
+
+    q('btnTimer').click();
+    if (q('tbar').hidden) throw new Error('timer bar did not open');
+    q('tPrep').value = 0; q('tWork').value = 2; q('tRest').value = 2; q('tRounds').value = 2;
+    q('tReplay').checked = true;
+    q('tStart').click();
+    say('timer started (work 2s, rest 2s, 2 rounds)');
+
+    await wait(() => q('tbar').dataset.phase === 'work' ? true : null, 'the work phase', 5000);
+    say('phase: work, showing ' + q('tTime').textContent);
+
+    // Work ending must rewind the delayed view to the start of the set, which is
+    // the reason the timer lives in this app at all.
+    await wait(() => q('tbar').dataset.phase === 'rest' ? true : null, 'the rest phase', 12000);
+    say('phase: rest, showing ' + q('tTime').textContent);
+    if (!replaying()) throw new Error('work ended but the delayed view did not rewind to replay the set');
+    say('set replay: delayed view rewound');
+
+    await wait(() => q('tbar').dataset.phase === 'done' ? true : null, 'the timer to finish', 20000);
+    say('timer finished: ' + q('tPhase').textContent);
+    if (replaying()) throw new Error('timer finished but the view was left in replay');
+    say('returned to live at the end');
+
     document.body.dataset.result = 'pass';
   } catch (e) {
     say('FAILED: ' + e.message);

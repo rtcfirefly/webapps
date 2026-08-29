@@ -3,8 +3,8 @@
 // Stamped by release.sh, and matched against version.txt at runtime. The page
 // knows what it IS; version.txt says what is CURRENT; a difference means this
 // tab is running stale code.
-const BUILD = '20260829-151854';
-const FILES = { js: '87b6bdf3f30a', css: 'a53d1de029c6', html: '202d7e845b8c' };
+const BUILD = '20260829-154015';
+const FILES = { js: '920bc10ccbd0', css: '869ee0ebf48c', html: '493326c4fdce' };
 /* ------------------------------------------------------------------------
  * video-delay — phone camera -> PC screen, on a delay. Zero dependencies.
  *
@@ -2132,6 +2132,225 @@ function verifyScanned(text) {
   }
 }
 
+/* ========================== INTERVAL TIMER ==========================
+ * Lives inside #stage so it is there in fullscreen, which is where a set is
+ * actually watched from.
+ *
+ * Deadline-based, not a tick counter: setInterval drifts and is throttled hard
+ * in a background tab, and a workout timer that quietly loses ten seconds is
+ * worse than no timer. Every tick recomputes from a wall-clock deadline, so
+ * accuracy does not depend on being scheduled on time. */
+
+const T = { queue: [], idx: 0, endAt: 0, left: 0, running: false, timer: 0, lastBeep: -1, wake: null };
+
+let AC = null;
+function audio() {
+  try {
+    if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+    // Browsers start it suspended; without an explicit resume from a gesture
+    // every beep is silently dropped and the timer looks broken but silent.
+    if (AC.state === 'suspended') AC.resume();
+  } catch (e) { dbg('timer', 'no audio', e); }
+  return AC;
+}
+
+function beep(freq, dur, when = 0, gain = 0.25) {
+  const ac = audio();
+  if (!ac) return;
+  const t0 = ac.currentTime + when;
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(freq, t0);
+  o.connect(g); g.connect(ac.destination);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.start(t0); o.stop(t0 + dur + 0.02);
+}
+
+function say(text) {
+  if (!$('#tVoice').checked || !window.speechSynthesis) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05; u.volume = 1;
+    speechSynthesis.speak(u);
+  } catch (e) { dbg('timer', 'speech failed', e); }
+}
+
+function timerCfg() {
+  const n = (id, d) => Math.max(0, Number($(id).value) || d);
+  return { prep: n('#tPrep', 5), work: n('#tWork', 30), rest: n('#tRest', 60), rounds: Math.max(1, n('#tRounds', 5)) };
+}
+
+function saveTimerCfg() {
+  const c = timerCfg();
+  store.set('timer', Object.assign(c, { voice: $('#tVoice').checked, replay: $('#tReplay').checked }));
+}
+
+function buildQueue() {
+  const c = timerCfg();
+  const q = [];
+  if (c.prep > 0) q.push({ type: 'prep', label: 'Get ready', dur: c.prep });
+  for (let r = 1; r <= c.rounds; r++) {
+    q.push({ type: 'work', label: 'Work', dur: c.work, round: r });
+    if (c.rest > 0 && r < c.rounds) q.push({ type: 'rest', label: 'Rest', dur: c.rest, round: r });
+  }
+  return q;
+}
+
+function renderTimer() {
+  const step = T.queue[T.idx];
+  const bar = $('#tbar');
+  if (!step) {
+    bar.dataset.phase = 'idle';
+    $('#tPhase').textContent = 'Ready';
+    $('#tTime').textContent = '--';
+    $('#tRound').textContent = '';
+    return;
+  }
+  bar.dataset.phase = step.type;
+  $('#tPhase').textContent = step.label;
+  const s = Math.max(0, T.left);
+  $('#tTime').textContent = s >= 60 ? Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') : String(s);
+  $('#tRound').textContent = step.round ? step.round + '/' + timerCfg().rounds : '';
+}
+
+/* The delay buffer is already holding the set that just finished. Rewinding to
+ * its start the moment work ends is the whole reason a timer belongs in this
+ * app rather than on a phone beside it. */
+function replayLastSet(seconds) {
+  if (!$('#tReplay').checked) return;
+  const sb = D.sb;
+  if (!sb || !sb.buffered.length || D.bypass) { dbg('timer', 'no buffer to replay'); return; }
+  const back = Math.min(seconds + 1, KEEP_BEHIND - 2);
+  dbg('timer', 'set finished - replaying the last', back + 's');
+  jump(-back);
+}
+
+function enterStep(i, announce) {
+  T.idx = i;
+  const step = T.queue[i];
+  if (!step) return finishTimer();
+  T.left = step.dur;
+  T.endAt = Date.now() + step.dur * 1000;
+  T.lastBeep = -1;
+  if (announce) {
+    if (step.type === 'work') { beep(880, 0.28, 0, 0.3); say('Work' + (step.round ? ', round ' + step.round : '')); }
+    else if (step.type === 'rest') { beep(520, 0.3, 0, 0.3); say('Rest'); }
+    else { beep(660, 0.2); say('Get ready'); }
+  }
+  renderTimer();
+}
+
+function tickTimer() {
+  const step = T.queue[T.idx];
+  if (!step) return;
+  const left = Math.max(0, Math.ceil((T.endAt - Date.now()) / 1000));
+
+  if (left !== T.left) {
+    T.left = left;
+    renderTimer();
+    // One beep per second, at most, however often this is scheduled.
+    if (left > 0 && left <= 3 && T.lastBeep !== left) { T.lastBeep = left; beep(660, 0.09, 0, 0.22); }
+  }
+  if (T.endAt - Date.now() > 0) return;
+
+  const finished = step;
+  if (finished.type === 'work') replayLastSet(finished.dur);
+  if (finished.type === 'rest' || (finished.type === 'work' && !$('#tReplay').checked)) {
+    D.live = true; setLiveBtn(); seekToEdge(D);
+  }
+  enterStep(T.idx + 1, true);
+}
+
+function startTimer() {
+  audio();                       // must happen inside the click
+  if (!T.queue.length) {
+    T.queue = buildQueue();
+    if (!T.queue.length) return;
+    enterStep(0, true);
+  } else {
+    T.endAt = Date.now() + T.left * 1000;   // resume from where it paused
+  }
+  T.running = true;
+  clearInterval(T.timer);
+  T.timer = setInterval(tickTimer, 200);
+  $('#tStart').disabled = true; $('#tPause').disabled = false;
+  $('#tStart').textContent = 'Start';
+  keepScreenOn(true);
+  dbg('timer', 'started', JSON.stringify(timerCfg()));
+}
+
+function pauseTimer() {
+  T.running = false;
+  clearInterval(T.timer); T.timer = 0;
+  $('#tStart').disabled = false; $('#tStart').textContent = 'Resume';
+  $('#tPause').disabled = true;
+}
+
+function resetTimer() {
+  T.running = false;
+  clearInterval(T.timer); T.timer = 0;
+  T.queue = []; T.idx = 0; T.left = 0; T.endAt = 0;
+  $('#tStart').disabled = false; $('#tStart').textContent = 'Start';
+  $('#tPause').disabled = true;
+  keepScreenOn(false);
+  renderTimer();
+}
+
+function finishTimer() {
+  clearInterval(T.timer); T.timer = 0;
+  T.running = false; T.queue = [];
+  $('#tbar').dataset.phase = 'done';
+  $('#tPhase').textContent = 'Done';
+  $('#tTime').textContent = '✓';
+  $('#tRound').textContent = '';
+  $('#tStart').disabled = false; $('#tStart').textContent = 'Start';
+  $('#tPause').disabled = true;
+  beep(1046, 0.3, 0); beep(1318, 0.35, 0.18); beep(1568, 0.5, 0.36);
+  say('Workout complete');
+  keepScreenOn(false);
+  D.live = true; setLiveBtn(); seekToEdge(D);
+}
+
+/* A workout is exactly the situation where nobody touches the machine for
+ * minutes at a time and the screen sleeping is worst. */
+async function keepScreenOn(on) {
+  try {
+    if (on && !T.wake && navigator.wakeLock) T.wake = await navigator.wakeLock.request('screen');
+    if (!on && T.wake) { await T.wake.release(); T.wake = null; }
+  } catch (e) { dbg('timer', 'wake lock unavailable', e && e.name); }
+}
+
+function wireTimer() {
+  const saved = store.get('timer', null);
+  if (saved) {
+    $('#tPrep').value = saved.prep; $('#tWork').value = saved.work;
+    $('#tRest').value = saved.rest; $('#tRounds').value = saved.rounds;
+    $('#tVoice').checked = saved.voice !== false;
+    $('#tReplay').checked = saved.replay !== false;
+  }
+  $('#tStart').onclick = startTimer;
+  $('#tPause').onclick = pauseTimer;
+  $('#tReset').onclick = resetTimer;
+  $('#tGear').onclick = () => { $('#tcfg').hidden = !$('#tcfg').hidden; };
+  $('#tClose').onclick = () => { $('#tcfg').hidden = true; saveTimerCfg(); };
+  for (const id of ['#tPrep', '#tWork', '#tRest', '#tRounds', '#tVoice', '#tReplay']) {
+    $(id).onchange = saveTimerCfg;
+  }
+  $('#btnTimer').onclick = () => {
+    const on = $('#tbar').hidden;
+    $('#tbar').hidden = !on;
+    if (!on) { $('#tcfg').hidden = true; resetTimer(); }
+    $('#btnTimer').classList.toggle('on', on);
+    store.set('timerOpen', on);
+    dbg('timer', on ? 'shown' : 'hidden');
+  };
+  if (store.get('timerOpen', false)) $('#btnTimer').click();
+  renderTimer();
+}
+
 /* ============================== WIRING ============================== */
 
 function wire() {
@@ -2272,6 +2491,7 @@ function wire() {
   };
 
   $('#btnSelf').onclick = () => toggleWebcam();
+  wireTimer();
   $('#vAlertRetry').onclick = async () => {
     clearAlert('v'); V.blocked = false; V.peerNat = null;
     setSig('starting again…');
@@ -2396,6 +2616,7 @@ function wire() {
     else if (k === 'm') $('#btnMirror').click();
     else if (k === 'p') $('#btnLayout').click();
     else if (k === 'c') $('#btnSelf').click();
+    else if (k === 't') $('#btnTimer').click();
     else if (k === 'u') $('#btnMute').click();
     else if (k === 'l') $('#btnLive').click();
     else if (e.key === 'ArrowLeft') { e.preventDefault(); jump(e.shiftKey ? -30 : -5); }

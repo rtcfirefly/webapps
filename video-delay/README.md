@@ -41,12 +41,37 @@ once. Needs `navigator.getBattery`, which Chrome has and Firefox and Safari
 deliberately removed; where it is missing the chip simply does not appear.
 | **⛶** | fullscreen |
 
+## Interval timer
+
+**⏱ Timer** in the toolbar, or `T`. It lives *inside* the video stage, so it is
+there in fullscreen too — which is where a set is actually watched from. Prepare
+/ work / rest / rounds, colour-coded by phase, with a gear for the settings.
+
+Two things it does that a timer beside you cannot:
+
+- **It replays the set the moment work ends.** The delay buffer is already
+  holding what you just did, so the rest period starts with a rewind to the
+  start of the set instead of you reaching for a scrub bar with chalk on your
+  hands. It returns to live when rest ends. Turn it off in the gear.
+- **It speaks the phase**, so you do not have to look up mid-lift. Web Speech,
+  no dependency, off in the gear if you would rather have only the tones.
+
+Audio is Web Audio tones: a short pip on each of the last three seconds, a
+higher tone entering work, a lower one entering rest, a rising three-note
+figure at the end. The `AudioContext` is created and resumed inside the Start
+click, because browsers start it suspended and every beep is otherwise dropped
+silently.
+
+The countdown is **deadline-based**, not a tick counter — `setInterval` drifts
+and is throttled hard in a background tab, and a workout timer that quietly
+loses ten seconds is worse than none. It also takes a wake lock while running.
+
 In **fullscreen** the toolbar is gone, so a control bar inside the video
 carries the delay: `−10 −5 −1 · 30s · +1 +5 +10`. It fades out with the cursor
 after a few idle seconds and returns on any movement or key.
 
 Keys: `space` freeze · `f` fullscreen · `m` mirror · `p` layout · `c` self-view ·
-`u` audio · `l` live · `←`/`→` jump 5 s (`shift` 30 s).
+`t` timer · `u` audio · `l` live · `←`/`→` jump 5 s (`shift` 30 s).
 
 Freeze, Live and the jump keys act on **both** feeds at once, so the phone and
 the self-view stay aligned.

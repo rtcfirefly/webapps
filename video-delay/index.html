@@ -154,6 +154,28 @@
         <div class="ovmsg" id="ovMsg">waiting for phone…</div>
       </div>
     </div>
+    <div class="timerbar" id="tbar" hidden data-phase="idle">
+      <span class="tphase" id="tPhase">Ready</span>
+      <span class="ttime" id="tTime" aria-live="polite">--</span>
+      <span class="tround" id="tRound"></span>
+      <button id="tStart">Start</button>
+      <button id="tPause" disabled>Pause</button>
+      <button id="tReset">Reset</button>
+      <button id="tGear" title="Timer settings">&#9881;</button>
+    </div>
+
+    <div class="timercfg" id="tcfg" hidden>
+      <div class="tgrid">
+        <label>Prepare<input type="number" id="tPrep" min="0" max="600" value="5"></label>
+        <label>Work<input type="number" id="tWork" min="1" max="3600" value="30"></label>
+        <label>Rest<input type="number" id="tRest" min="0" max="3600" value="60"></label>
+        <label>Rounds<input type="number" id="tRounds" min="1" max="99" value="5"></label>
+      </div>
+      <label class="chk"><input type="checkbox" id="tVoice" checked> speak the phase, so you need not look</label>
+      <label class="chk"><input type="checkbox" id="tReplay" checked> replay the set when work ends</label>
+      <div class="grp"><button id="tClose" class="sm">Done</button></div>
+    </div>
+
     <div class="hud" id="hud"></div>
     <div class="fsbar" id="fsbar">
       <button data-d="-10" title="10 s less delay">&minus;10</button>
@@ -180,6 +202,7 @@
       <button id="btnMirror" title="Mirror image (M)">Mirror</button>
       <button id="btnLayout" title="Layout: split / delayed only / corner thumbnail (P)">▥&nbsp;Split</button>
       <button id="btnSelf" title="This computer's webcam, live and delayed (C)">📷&nbsp;Self</button>
+      <button id="btnTimer" title="Interval timer (T)">⏱&nbsp;Timer</button>
       <button id="btnMute" title="Audio on/off (U)">🔇</button>
       <button id="btnFs" title="Fullscreen (F)">⛶</button>
       <button id="btnLog" data-log title="Debug log">🐞</button>
